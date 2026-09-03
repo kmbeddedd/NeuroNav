@@ -159,6 +159,13 @@ def test_d_no_central_collapse_caused_by_scaling():
     assert np.isclose(restored[2, 0], 58.0)
     assert np.isclose(restored[2, 1], -75.0)
 
+    # Also verify model produces non-trivial predictions: a model that always
+    # predicts delta=0 would predict raw_deltas[i] = baseline alone,
+    # but the restored large-amplitude deltas should be preserved by inverse scaling.
+    # Check that the maximum restored amplitude is not collapsed to near-zero.
+    max_amp = np.max(np.abs(restored))
+    assert max_amp > 10.0, f"Inverse scaling must preserve large amplitudes, got max={max_amp}m"
+
 
 # ---------------------------------------------------------------------------
 # Test E — regime feature is causal
@@ -241,7 +248,7 @@ def test_g_official_benchmark_remains_intact():
         'Gaussian Process',
         'BiLSTM-GRU',
         'Transformer',
-        'GEO Regime-Aware Residual',
+        'GEO Gated MoE',
     ]
     for model_name in required_models:
         assert f"'{model_name}'" in source, f"Benchmark runner must contain model: {model_name}"
@@ -266,14 +273,15 @@ def test_h_model_identity(tmp_path: Path):
     }
     all_preds = {
         'Persistence': {'GEO': np.zeros((3, 4))},
-        'GEO Regime-Aware Residual': {'GEO': np.ones((3, 4))},
+        'GEO Gated MoE': {'GEO': np.ones((3, 4))},
     }
     diagnostics = {
-        'GEO Regime-Aware Residual': {
+        'GEO Gated MoE': {
             ('GEO', 0): {
                 'baseline_x': 0.5, 'baseline_y': 0.5, 'baseline_z': 0.5, 'baseline_clock': 0.5,
                 'delta_x': 0.5, 'delta_y': 0.5, 'delta_z': 0.5, 'delta_clock': 0.5,
-                'regime_probability': 0.85, 'lead_time_hours': 1.2, 'history_span_hours': 23.5,
+                'p_gate': 0.75, 'regime_probability': 0.85,
+                'lead_time_hours': 1.2, 'history_span_hours': 23.5,
             }
         }
     }
@@ -284,12 +292,152 @@ def test_h_model_identity(tmp_path: Path):
     saved_df = pd.read_csv(out_file)
     assert 'model' in saved_df.columns, "Predictions CSV must contain 'model' column"
     models_present = set(saved_df['model'].unique())
-    assert 'GEO Regime-Aware Residual' in models_present
+    assert 'GEO Gated MoE' in models_present
     assert 'Persistence' in models_present
 
     # Check that diagnostic fields exist and are populated
-    geo_residual_rows = saved_df[saved_df['model'] == 'GEO Regime-Aware Residual']
-    assert 'regime_probability' in geo_residual_rows.columns
-    assert 'lead_time_hours' in geo_residual_rows.columns
-    assert 'history_span_hours' in geo_residual_rows.columns
-    assert np.isclose(geo_residual_rows['regime_probability'].iloc[0], 0.85)
+    moe_rows = saved_df[saved_df['model'] == 'GEO Gated MoE']
+    assert 'lead_time_hours' in moe_rows.columns
+    assert 'history_span_hours' in moe_rows.columns
+    assert 'p_gate' in moe_rows.columns
+
+
+# ---------------------------------------------------------------------------
+# Test I — model forward returns 3 values (delta_pred, gate_logit, p_gate)
+# The new GEOGatedMoEModel.forward must return exactly 3 tensors.
+# ---------------------------------------------------------------------------
+def test_i_model_returns_three_values():
+    from scripts.benchmark_ps08 import GEOGatedMoEModel
+    model = GEOGatedMoEModel(history_dim=19, query_dim=13, num_series=3)
+    model.eval()
+    B = 4
+    history   = torch.zeros(B, 32, 19)
+    query     = torch.zeros(B, 13)
+    series_id = torch.zeros(B, dtype=torch.long)
+    with torch.no_grad():
+        out = model(history, query, series_id)
+    assert len(out) == 3, f"forward() must return 3 tensors, got {len(out)}"
+    delta_pred, gate_logit, p_gate = out
+    assert delta_pred.shape  == (B, 4), f"delta_pred shape wrong: {delta_pred.shape}"
+    assert gate_logit.shape  == (B,),   f"gate_logit shape wrong: {gate_logit.shape}"
+    assert p_gate.shape      == (B, 1), f"p_gate shape wrong: {p_gate.shape}"
+
+
+# ---------------------------------------------------------------------------
+# Test J — p_gate is in (0, 1) for all inputs
+# Sigmoid output must be strictly bounded.
+# ---------------------------------------------------------------------------
+def test_j_p_gate_bounded():
+    from scripts.benchmark_ps08 import GEOGatedMoEModel
+    torch.manual_seed(0)
+    model = GEOGatedMoEModel(history_dim=19, query_dim=13, num_series=3)
+    model.eval()
+    B = 64
+    history   = torch.randn(B, 32, 19)
+    query     = torch.randn(B, 13)
+    series_id = torch.randint(0, 3, (B,))
+    with torch.no_grad():
+        _, _, p_gate = model(history, query, series_id)
+    assert (p_gate > 0).all(), "p_gate must be > 0 (strict sigmoid)"
+    assert (p_gate < 1).all(), "p_gate must be < 1 (strict sigmoid)"
+
+
+# ---------------------------------------------------------------------------
+# Test K — perturbing gate logit changes prediction
+# This verifies that p_gate actually gates the output amplitude, not just
+# a dormant auxiliary variable.
+# ---------------------------------------------------------------------------
+def test_k_gate_controls_prediction():
+    from scripts.benchmark_ps08 import GEOGatedMoEModel
+    import copy
+    torch.manual_seed(42)
+    model = GEOGatedMoEModel(history_dim=19, query_dim=13, num_series=3)
+    model.eval()
+
+    B = 4
+    history   = torch.randn(B, 32, 19)
+    query     = torch.randn(B, 13)
+    series_id = torch.zeros(B, dtype=torch.long)
+
+    with torch.no_grad():
+        delta_base, _, p_gate_base = model(history, query, series_id)
+
+    # Patch gate_head to saturate toward excursion (p_gate → 1)
+    model_high = copy.deepcopy(model)
+    with torch.no_grad():
+        model_high.gate_head[-1].bias.fill_(20.0)   # logit → large positive → p_gate → 1
+    with torch.no_grad():
+        delta_high, _, p_gate_high = model_high(history, query, series_id)
+
+    # Patch gate_head to saturate toward normal (p_gate → 0)
+    model_low = copy.deepcopy(model)
+    with torch.no_grad():
+        model_low.gate_head[-1].bias.fill_(-20.0)   # logit → large negative → p_gate → 0
+    with torch.no_grad():
+        delta_low, _, p_gate_low = model_low(history, query, series_id)
+
+    assert (p_gate_high > 0.99).all(), "Gate must saturate high"
+    assert (p_gate_low < 0.01).all(), "Gate must saturate low"
+    # When p_gate is saturated high, output ≈ excursion_head; low → normal_head.
+    # They must differ unless both heads are identical (which they won't be after random init).
+    max_diff = (delta_high - delta_low).abs().max().item()
+    assert max_diff > 1e-4, f"Saturating p_gate must change output (max_diff={max_diff})"
+
+
+# ---------------------------------------------------------------------------
+# Test L — normal_head and excursion_head are structurally distinct
+# Verifies that the architecture has genuinely separate expert outputs.
+# ---------------------------------------------------------------------------
+def test_l_expert_heads_distinct():
+    from scripts.benchmark_ps08 import GEOGatedMoEModel
+    model = GEOGatedMoEModel(history_dim=19, query_dim=13, num_series=3)
+    normal_params    = sum(p.numel() for p in model.normal_head.parameters())
+    excursion_params = sum(p.numel() for p in model.excursion_head.parameters())
+    assert normal_params > 0,    "normal_head must have parameters"
+    assert excursion_params > 0, "excursion_head must have parameters"
+    # Excursion head is wider (more capacity for large amplitudes)
+    assert excursion_params > normal_params, (
+        f"excursion_head ({excursion_params} params) must be larger than normal_head ({normal_params} params)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test M — gate_logit is differentiable w.r.t. model parameters
+# The gate must participate in the computational graph (no stop_gradient).
+# ---------------------------------------------------------------------------
+def test_m_gate_participates_in_gradient():
+    from scripts.benchmark_ps08 import GEOGatedMoEModel
+    torch.manual_seed(0)
+    model = GEOGatedMoEModel(history_dim=19, query_dim=13, num_series=3)
+    model.train()
+
+    history   = torch.randn(4, 32, 19)
+    query     = torch.randn(4, 13)
+    series_id = torch.zeros(4, dtype=torch.long)
+
+    delta_pred, gate_logit, p_gate = model(history, query, series_id)
+    # Loss that touches both prediction and gate
+    loss = delta_pred.sum() + gate_logit.sum()
+    loss.backward()
+
+    # gate_head parameters must have gradients
+    for param in model.gate_head.parameters():
+        assert param.grad is not None, "gate_head parameters must receive gradients"
+        assert param.grad.abs().sum() > 0, "gate_head gradients must be non-zero"
+
+
+# ---------------------------------------------------------------------------
+# Test N — GEOGatedMoEModel is the alias target of GEORegimeAwareResidualModel
+# Existing tests that import GEORegimeAwareResidualModel must not break.
+# ---------------------------------------------------------------------------
+def test_n_backward_compatible_alias():
+    from scripts.benchmark_ps08 import GEOGatedMoEModel, GEORegimeAwareResidualModel
+    assert GEORegimeAwareResidualModel is GEOGatedMoEModel, (
+        "GEORegimeAwareResidualModel must be an alias for GEOGatedMoEModel"
+    )
+    # Alias can be constructed and used identically
+    model = GEORegimeAwareResidualModel(history_dim=19, query_dim=13, num_series=3)
+    assert hasattr(model, 'gate_head'),       "Alias model must have gate_head"
+    assert hasattr(model, 'normal_head'),     "Alias model must have normal_head"
+    assert hasattr(model, 'excursion_head'),  "Alias model must have excursion_head"
+

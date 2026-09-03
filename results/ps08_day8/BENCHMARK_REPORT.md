@@ -4,12 +4,12 @@ Models were trained only on the supplied seven-day files and evaluated at every 
 
 ## Official ranking
 
-**Winner: Harmonic Ridge** — highest average Shapiro–Wilk W across the four equally weighted residual parameters.
+**Winner: GEO Gated MoE** — highest average Shapiro–Wilk W across the four equally weighted residual parameters.
 
 | Rank | Model | Avg W | 95% Bootstrap CI | Avg p-value | Rejected tests | MAE (m) | RMSE (m) | GEO W | GEO MAE (m) | GEO RMSE (m) |
 |---:|---|---:|:---:|---:|---:|---:|---:|---:|---:|---:|
-| 1 | Harmonic Ridge | 0.848832 | [0.6633, 0.9099] | 0.177741 | 7/12 | 6.2670 | 13.2564 | 0.802403 | 8.3850 | 15.0409 |
-| 2 | GEO Regime-Aware Residual | 0.848733 | [0.6632, 0.9098] | 0.177696 | 7/12 | 6.2359 | 13.2446 | 0.802303 | 8.3427 | 15.0231 |
+| 1 | GEO Gated MoE | 0.848836 | [0.6638, 0.9104] | 0.184691 | 7/12 | 6.2689 | 13.2577 | 0.802533 | 8.3935 | 15.0322 |
+| 2 | Harmonic Ridge | 0.848832 | [0.6633, 0.9099] | 0.177741 | 7/12 | 6.2670 | 13.2564 | 0.802403 | 8.3850 | 15.0409 |
 | 3 | Random Forest | 0.847138 | [0.6621, 0.9091] | 0.217385 | 6/12 | 6.2561 | 13.3577 | 0.782957 | 8.3774 | 15.1316 |
 | 4 | BiLSTM-GRU | 0.827697 | [0.6417, 0.9078] | 0.134819 | 8/12 | 5.9497 | 13.1961 | 0.783743 | 7.9725 | 14.9500 |
 | 5 | Persistence | 0.826648 | [0.6430, 0.9078] | 0.126571 | 8/12 | 6.0758 | 13.1989 | 0.783926 | 8.1226 | 14.9642 |

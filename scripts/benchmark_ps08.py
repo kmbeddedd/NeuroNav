@@ -456,255 +456,459 @@ def _physical_query_features(
     ]
     return np.asarray(query_arr, dtype=np.float32)
 
-class GEORegimeAwareResidualModel(nn.Module):
+# ---------------------------------------------------------------------------
+# GEO Gated Mixture-of-Experts Model
+#
+# Architecture: Bidirectional GRU encodes 24h physical history → produces
+# both a latent state h_enc and a learned gate p_gate ∈ [0,1].
+# Two expert heads (Normal + Excursion) produce candidate residual corrections.
+# Final delta = (1 - p_gate) * normal_delta + p_gate * excursion_delta
+#
+# p_gate mathematically gates prediction amplitude — it is NOT merely
+# concatenated as a feature. Gradients flow back through the gate to the
+# regime encoder.
+# ponytail: ~10k params; gate is query-conditional via GRU hidden state.
+# ---------------------------------------------------------------------------
+class GEOGatedMoEModel(nn.Module):
     def __init__(self, history_dim: int, query_dim: int, num_series: int) -> None:
         super().__init__()
-        self.gru = nn.GRU(history_dim, 24, batch_first=True, bidirectional=True)
-        self.ln = nn.LayerNorm(48)
+        hidden  = 24
+        enc_out = hidden * 2   # bidirectional → 48
+        self.gru     = nn.GRU(history_dim, hidden, batch_first=True, bidirectional=True)
+        self.ln      = nn.LayerNorm(enc_out)
         self.dropout = nn.Dropout(0.1)
-        self.query_proj = nn.Sequential(
-            nn.Linear(query_dim, 24),
-            nn.SiLU(),
-            nn.Linear(24, 24),
-        )
-        self.series_embedding = nn.Embedding(num_series, 8)
-        combined_dim = 48 + 24 + 8 + 1
-        self.regime_head = nn.Sequential(
-            nn.Linear(combined_dim, 16),
-            nn.SiLU(),
-            nn.Linear(16, 1),
-        )
-        self.residual_head = nn.Sequential(
-            nn.Linear(combined_dim, 48),
-            nn.SiLU(),
-            nn.Linear(48, 32),
-            nn.SiLU(),
-            nn.Linear(32, 4),
+        self.query_proj = nn.Sequential(nn.Linear(query_dim, 24), nn.SiLU(), nn.Linear(24, 24))
+        self.series_emb = nn.Embedding(num_series, 8)
+        fused = enc_out + 24 + 8   # 80
+
+        # Regime gate → scalar p_gate ∈ (0,1)
+        self.gate_head = nn.Sequential(nn.Linear(fused, 24), nn.SiLU(), nn.Linear(24, 1))
+
+        # Normal-regime expert
+        self.normal_head = nn.Sequential(nn.Linear(fused, 32), nn.SiLU(), nn.Linear(32, 4))
+
+        # Excursion expert (wider to capture large amplitudes)
+        self.excursion_head = nn.Sequential(
+            nn.Linear(fused, 48), nn.SiLU(), nn.Linear(48, 32), nn.SiLU(), nn.Linear(32, 4)
         )
 
-    def forward(self, history: torch.Tensor, query: torch.Tensor, series_id: torch.Tensor, regime_prob: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        out, _ = self.gru(history)
-        h_enc = self.dropout(self.ln(out[:, -1]))
-        h_query = self.query_proj(query)
-        h_series = self.series_embedding(series_id)
-        combined = torch.cat((h_enc, h_query, h_series, regime_prob.unsqueeze(-1)), dim=-1)
-        pred_delta = self.residual_head(combined)
-        pred_regime = self.regime_head(combined).squeeze(-1)
-        return pred_delta, pred_regime
+    def forward(
+        self,
+        history: torch.Tensor,
+        query: torch.Tensor,
+        series_id: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Returns: delta_pred (B,4), gate_logit (B,), p_gate (B,1)"""
+        out, _  = self.gru(history)
+        h_enc   = self.dropout(self.ln(out[:, -1]))
+        h_q     = self.query_proj(query)
+        h_s     = self.series_emb(series_id)
+        fused   = torch.cat((h_enc, h_q, h_s), dim=-1)
 
-def predict_geo_regime_aware(datasets: dict[str, dict[str, Any]], device: torch.device, max_epochs: int, output_dir: Path) -> tuple[dict[str, np.ndarray], dict[tuple[str, int], dict[str, Any]]]:
+        gate_logit = self.gate_head(fused).squeeze(-1)           # (B,)
+        p_gate     = torch.sigmoid(gate_logit).unsqueeze(-1)     # (B,1)
+
+        normal_delta    = self.normal_head(fused)                # (B,4)
+        excursion_delta = self.excursion_head(fused)             # (B,4)
+
+        # True regime gating: p_gate directly controls prediction amplitude
+        delta_pred = (1.0 - p_gate) * normal_delta + p_gate * excursion_delta
+
+        return delta_pred, gate_logit, p_gate
+
+
+# Keep alias so existing tests (A–H) that import GEORegimeAwareResidualModel still work.
+# The alias is structurally compatible only for forward() calls that pass 3 positional args.
+GEORegimeAwareResidualModel = GEOGatedMoEModel
+
+
+def _geo_moe_loss(
+    pred_delta: torch.Tensor,
+    true_delta: torch.Tensor,
+    gate_logit: torch.Tensor,
+    true_regime: torch.Tensor,
+    s_d: torch.Tensor,
+    lambda_amp: float = 0.15,
+    lambda_dir: float = 0.05,
+    lambda_regime: float = 0.05,
+    gamma_focal: float = 2.0,
+) -> torch.Tensor:
+    """Compound loss: Huber + amplitude + directional (large excursions) + focal BCE."""
+    huber      = nn.functional.smooth_l1_loss(pred_delta, true_delta, beta=1.0)
+    pred_phys  = pred_delta * s_d
+    true_phys  = true_delta * s_d
+    pred_norm  = torch.norm(pred_phys[:, :3], dim=-1)
+    true_norm  = torch.norm(true_phys[:, :3], dim=-1)
+    amp_loss   = nn.functional.smooth_l1_loss(pred_norm, true_norm, beta=1.0)
+    large_mask = (true_norm > 1.0).float()
+    cos_sim    = nn.functional.cosine_similarity(pred_phys[:, :3] + 1e-8, true_phys[:, :3] + 1e-8, dim=-1)
+    dir_loss   = (large_mask * (1.0 - cos_sim)).mean()
+    p          = torch.sigmoid(gate_logit)
+    bce_raw    = nn.functional.binary_cross_entropy_with_logits(gate_logit, true_regime, reduction='none')
+    pt             = torch.where(true_regime > 0.5, p, 1.0 - p)
+    focal_weight   = (1.0 - pt) ** gamma_focal
+    focal_bce      = (focal_weight * bce_raw).mean()
+    return huber + lambda_amp * amp_loss + lambda_dir * dir_loss + lambda_regime * focal_bce
+
+
+def _build_geo_moe_examples(
+    frame: pd.DataFrame,
+    origin: pd.Timestamp,
+    series_idx: int,
+    baseline: Any,
+    detector: dict[str, float],
+    c_d: np.ndarray,
+    s_d: np.ndarray,
+    val_start: pd.Timestamp,
+    oversample_high_amp: int = 3,
+) -> tuple[dict[str, list], dict[str, list]]:
+    """Build train/val examples with 3× oversampling of high-amplitude training examples."""
+    train_data: dict[str, list] = {'hist': [], 'q': [], 'sid': [], 'target_d': [], 'target_r': []}
+    val_data:   dict[str, list] = {'hist': [], 'q': [], 'sid': [], 'target_d': [], 'target_r': []}
+    x0 = detector['x0']
+
+    for target_idx in range(3, len(frame)):
+        query_time = frame['utc_time'].iloc[target_idx]
+        is_val     = query_time >= val_start
+        cutoffs    = [target_idx - 1]
+        for h in (6, 12, 24, 48):
+            el = np.flatnonzero(
+                (frame['utc_time'].iloc[:target_idx] <= query_time - pd.Timedelta(hours=h)).to_numpy()
+            )
+            if len(el):
+                cutoffs.append(int(el[-1]))
+        cutoffs = sorted(set(c for c in cutoffs if c >= 2))
+        if is_val:
+            cutoffs = [c for c in cutoffs if frame['utc_time'].iloc[c] < val_start]
+
+        for c in cutoffs:
+            hist, meta = _physical_history_tensor(frame, c, query_time, origin, baseline, c_d, s_d)
+            rms    = float(np.sqrt(np.mean(meta['orbit_norms'][-4:] ** 2)))
+            flips  = float(np.mean(np.diff(np.sign(meta['vals'][:, 0])) != 0)) if len(meta['vals']) > 1 else 0.0
+            q_feat = _physical_query_features(
+                query_time, frame['utc_time'].iloc[c], origin,
+                _compute_regime_probability(meta['orbit_norms'], detector), rms, flips,
+            )
+            x_q    = time_features(pd.Series([query_time]), origin)
+            base_q = baseline.predict(x_q)[0]
+            true_d = (frame[list(TARGETS)].iloc[target_idx].to_numpy(dtype=float) - base_q - c_d) / s_d
+            t_norm = float(np.sqrt(np.sum(frame[list(TARGETS)[:3]].iloc[target_idx].to_numpy(dtype=float) ** 2)))
+            # Soft regime target: sigmoid of (norm − x0) / scale
+            t_regime = float(1.0 / (1.0 + np.exp(-((t_norm - x0) / max(detector['scale'], 0.5)))))
+
+            dest = val_data if is_val else train_data
+            dest['hist'].append(hist)
+            dest['q'].append(q_feat)
+            dest['sid'].append(series_idx)
+            dest['target_d'].append(true_d)
+            dest['target_r'].append(t_regime)
+
+            # 3× oversample high-amplitude training examples (never validation).
+            # ponytail: simple replication; focal sampling overkill at 142 rows.
+            if not is_val and t_norm > x0:
+                for _ in range(oversample_high_amp - 1):
+                    train_data['hist'].append(hist)
+                    train_data['q'].append(q_feat)
+                    train_data['sid'].append(series_idx)
+                    train_data['target_d'].append(true_d)
+                    train_data['target_r'].append(t_regime)
+
+    return train_data, val_data
+
+
+def _rolling_backtest_geo(
+    frame: pd.DataFrame,
+    origin: pd.Timestamp,
+    baseline: Any,
+    detector: dict[str, float],
+    c_d: np.ndarray,
+    s_d: np.ndarray,
+    model: GEOGatedMoEModel,
+    device: torch.device,
+) -> dict[str, Any]:
+    """4-fold causal rolling backtest within GEO training data only. Never uses Day-8 actuals."""
+    times     = frame['utc_time']
+    day_start = times.min().floor('D')
+    fold_configs = [(3, 4, 5), (4, 5, 6), (5, 6, 7), (6, 7, 8)]
+    fold_results: dict[str, Any] = {}
+    all_maes: list[float] = []
+    all_ws:   list[float] = []
+    model.eval()
+
+    for fold_idx, (tr_end_day, pred_start_day, pred_end_day) in enumerate(fold_configs):
+        train_end  = day_start + pd.Timedelta(days=tr_end_day)
+        pred_start = day_start + pd.Timedelta(days=pred_start_day)
+        pred_end   = day_start + pd.Timedelta(days=pred_end_day)
+        train_mask = times < train_end
+        pred_mask  = (times >= pred_start) & (times < pred_end)
+
+        if train_mask.sum() < 4 or pred_mask.sum() < 4:
+            continue
+
+        train_frame = frame[train_mask].reset_index(drop=True)
+        pred_frame  = frame[pred_mask].reset_index(drop=True)
+        fold_baseline = _fit_causal_baseline(train_frame, origin)
+        x_tr        = time_features(train_frame['utc_time'], origin)
+        fold_deltas = train_frame[list(TARGETS)].to_numpy(dtype=float) - fold_baseline.predict(x_tr)
+        fold_c_d    = np.median(fold_deltas, axis=0)
+        fold_q25, fold_q75 = np.quantile(fold_deltas, [0.25, 0.75], axis=0)
+        fold_s_d    = np.maximum((fold_q75 - fold_q25) / 1.349, 0.0001)
+        fold_det    = _fit_regime_detector(train_frame)
+        train_cutoff = len(train_frame) - 1
+
+        hists, qs, sids = [], [], []
+        for _, query_time in enumerate(pred_frame['utc_time']):
+            hist, meta = _physical_history_tensor(train_frame, train_cutoff, query_time, origin, fold_baseline, fold_c_d, fold_s_d)
+            rms   = float(np.sqrt(np.mean(meta['orbit_norms'][-4:] ** 2)))
+            flips = float(np.mean(np.diff(np.sign(meta['vals'][:, 0])) != 0)) if len(meta['vals']) > 1 else 0.0
+            q_feat = _physical_query_features(
+                query_time, train_frame['utc_time'].iloc[train_cutoff], origin,
+                _compute_regime_probability(meta['orbit_norms'], fold_det), rms, flips,
+            )
+            hists.append(hist)
+            qs.append(q_feat)
+            sids.append(0)
+
+        with torch.no_grad():
+            pred_d, _, _ = model(
+                torch.as_tensor(np.array(hists), dtype=torch.float32, device=device),
+                torch.as_tensor(np.array(qs),    dtype=torch.float32, device=device),
+                torch.as_tensor(np.array(sids),  dtype=torch.long,    device=device),
+            )
+            delta_phys = pred_d.cpu().numpy() * fold_s_d + fold_c_d
+
+        pred_phys = fold_baseline.predict(time_features(pred_frame['utc_time'], origin)) + delta_phys
+        actual    = pred_frame[list(TARGETS)].to_numpy(dtype=float)
+        residuals = pred_phys - actual
+        mae    = float(np.mean(np.abs(residuals)))
+        w_mean = float(np.mean([stats.shapiro(residuals[:, i]).statistic for i in range(4)]))
+        all_maes.append(mae)
+        all_ws.append(w_mean)
+        fold_results[f'fold_{fold_idx + 1}'] = {
+            'train_rows': int(train_mask.sum()), 'pred_rows': int(pred_mask.sum()),
+            'mae_m': mae, 'mean_shapiro_w': w_mean,
+        }
+
+    fold_results['aggregate'] = {
+        'mean_mae_m':     float(np.mean(all_maes)) if all_maes else float('nan'),
+        'mean_shapiro_w': float(np.mean(all_ws))   if all_ws   else float('nan'),
+        'folds_completed': len(all_maes),
+    }
+    return fold_results
+
+
+def predict_geo_gated_moe(
+    datasets: dict[str, dict[str, Any]],
+    device: torch.device,
+    max_epochs: int,
+    output_dir: Path,
+) -> tuple[dict[str, np.ndarray], dict[tuple[str, int], dict[str, Any]]]:
+    """GEO Gated MoE: dual expert heads gated by learned p_gate from GRU history."""
     baselines: dict[str, Any] = {}
     detectors: dict[str, dict[str, float]] = {}
     delta_scalers: dict[str, tuple[np.ndarray, np.ndarray]] = {}
 
     for name, item in datasets.items():
-        frame = item['train']
+        frame  = item['train']
         origin = item['origin']
-        base = _fit_causal_baseline(frame, origin)
-        baselines[name] = base
-        detectors[name] = _fit_regime_detector(frame)
-        x_tr = time_features(frame['utc_time'], origin)
-        base_preds = base.predict(x_tr)
-        deltas = frame[list(TARGETS)].to_numpy(dtype=float) - base_preds
-        c_d = np.median(deltas, axis=0)
-        q25, q75 = np.quantile(deltas, [0.25, 0.75], axis=0)
-        s_d = np.maximum((q75 - q25) / 1.349, 0.0001)
+        base   = _fit_causal_baseline(frame, origin)
+        baselines[name]  = base
+        detectors[name]  = _fit_regime_detector(frame)
+        x_tr             = time_features(frame['utc_time'], origin)
+        base_preds        = base.predict(x_tr)
+        deltas            = frame[list(TARGETS)].to_numpy(dtype=float) - base_preds
+        c_d               = np.median(deltas, axis=0)
+        q25, q75          = np.quantile(deltas, [0.25, 0.75], axis=0)
+        s_d               = np.maximum((q75 - q25) / 1.349, 0.0001)
         delta_scalers[name] = (c_d, s_d)
 
-    train_data = {'hist': [], 'q': [], 'sid': [], 'r_prob': [], 'target_d': [], 'target_r': []}
-    val_data = {'hist': [], 'q': [], 'sid': [], 'r_prob': [], 'target_d': [], 'target_r': []}
+    train_data: dict[str, list] = {'hist': [], 'q': [], 'sid': [], 'target_d': [], 'target_r': []}
+    val_data:   dict[str, list] = {'hist': [], 'q': [], 'sid': [], 'target_d': [], 'target_r': []}
 
     for name, item in datasets.items():
-        frame = item['train']
+        frame  = item['train']
         origin = item['origin']
         c_d, s_d = delta_scalers[name]
         val_start = frame['utc_time'].max().floor('D')
-        for target_idx in range(3, len(frame)):
-            query_time = frame['utc_time'].iloc[target_idx]
-            is_val = query_time >= val_start
-            cutoffs = [target_idx - 1]
-            for h in (6, 12, 24, 48):
-                el = np.flatnonzero((frame['utc_time'].iloc[:target_idx] <= query_time - pd.Timedelta(hours=h)).to_numpy())
-                if len(el):
-                    cutoffs.append(int(el[-1]))
-            cutoffs = sorted(set((c for c in cutoffs if c >= 2)))
-            if is_val:
-                cutoffs = [c for c in cutoffs if frame['utc_time'].iloc[c] < val_start]
-            for c in cutoffs:
-                hist, meta = _physical_history_tensor(frame, c, query_time, origin, baselines[name], c_d, s_d)
-                r_prob = _compute_regime_probability(meta['orbit_norms'], detectors[name])
-                rms = float(np.sqrt(np.mean(meta['orbit_norms'][-4:] ** 2)))
-                flips = float(np.mean(np.diff(np.sign(meta['vals'][:, 0])) != 0)) if len(meta['vals']) > 1 else 0.0
-                q_feat = _physical_query_features(query_time, frame['utc_time'].iloc[c], origin, r_prob, rms, flips)
-
-                x_q = time_features(pd.Series([query_time]), origin)
-                base_q = baselines[name].predict(x_q)[0]
-                true_d = (frame[list(TARGETS)].iloc[target_idx].to_numpy(dtype=float) - base_q - c_d) / s_d
-                t_norm = float(np.sqrt(np.sum(frame[list(TARGETS)[:3]].iloc[target_idx].to_numpy(dtype=float) ** 2)))
-                t_regime = 1.0 if t_norm > detectors[name]['x0'] else 0.0
-
-                dest = val_data if is_val else train_data
-                dest['hist'].append(hist)
-                dest['q'].append(q_feat)
-                dest['sid'].append(item['series_index'])
-                dest['r_prob'].append(r_prob)
-                dest['target_d'].append(true_d)
-                dest['target_r'].append(t_regime)
+        td, vd = _build_geo_moe_examples(
+            frame, origin, item['series_index'],
+            baselines[name], detectors[name], c_d, s_d, val_start, oversample_high_amp=3,
+        )
+        for k in train_data:
+            train_data[k].extend(td[k])
+            val_data[k].extend(vd[k])
 
     def to_tensors(d: dict[str, list]) -> tuple[torch.Tensor, ...]:
         return (
-            torch.as_tensor(np.array(d['hist']), dtype=torch.float32),
-            torch.as_tensor(np.array(d['q']), dtype=torch.float32),
-            torch.as_tensor(np.array(d['sid']), dtype=torch.long),
-            torch.as_tensor(np.array(d['r_prob']), dtype=torch.float32),
+            torch.as_tensor(np.array(d['hist']),     dtype=torch.float32),
+            torch.as_tensor(np.array(d['q']),        dtype=torch.float32),
+            torch.as_tensor(np.array(d['sid']),      dtype=torch.long),
             torch.as_tensor(np.array(d['target_d']), dtype=torch.float32),
             torch.as_tensor(np.array(d['target_r']), dtype=torch.float32),
         )
 
-    tr_tensors = to_tensors(train_data)
-    val_tensors = to_tensors(val_data)
 
-    model = GEORegimeAwareResidualModel(tr_tensors[0].shape[-1], tr_tensors[1].shape[-1], len(datasets)).to(device)
+    tr_tensors  = to_tensors(train_data)
+    val_tensors = to_tensors(val_data)
+    history_dim, query_dim = tr_tensors[0].shape[-1], tr_tensors[1].shape[-1]
+
+    # Scale tensor for amplitude loss (physical units); use GEO scale
+    geo_s_d = delta_scalers['GEO'][1]
+    s_d_tensor = torch.as_tensor(geo_s_d, dtype=torch.float32, device=device)
+
+    def make_model() -> GEOGatedMoEModel:
+        return GEOGatedMoEModel(history_dim, query_dim, len(datasets)).to(device)
+
+    model = make_model()
     optimizer = torch.optim.AdamW(model.parameters(), lr=0.001, weight_decay=0.0001)
 
-    tr_loader = DataLoader(TensorDataset(*tr_tensors), batch_size=32, shuffle=True)
+    tr_loader  = DataLoader(TensorDataset(*tr_tensors),  batch_size=32, shuffle=True)
     val_loader = DataLoader(TensorDataset(*val_tensors), batch_size=32, shuffle=False)
 
     best_val_loss = float('inf')
-    best_epoch = 1
-    stale = 0
+    best_epoch    = 1
+    stale         = 0
+
     for epoch in range(1, max_epochs + 1):
         model.train()
-        for h, q, sid, rp, td, tr in tr_loader:
-            h, q = h.to(device), q.to(device)
-            sid, rp = sid.to(device), rp.to(device)
+        for h, q, sid, td, tr in tr_loader:
+            h, q   = h.to(device), q.to(device)
+            sid    = sid.to(device)
             td, tr = td.to(device), tr.to(device)
-
             optimizer.zero_grad(set_to_none=True)
-            pd_d, pd_r = model(h, q, sid, rp)
-            huber = nn.functional.smooth_l1_loss(pd_d, td, beta=1.0)
-            amp = torch.norm(td, dim=-1, keepdim=True)
-            weights = 1.0 + 1.5 * torch.clamp(amp, max=3.0) / 3.0
-            weighted_mse = torch.mean(weights * (pd_d - td) ** 2)
-            bce = nn.functional.binary_cross_entropy_with_logits(pd_r, tr)
-            loss = huber + 0.1 * weighted_mse + 0.05 * bce
+            pred_d, gate_logit, _ = model(h, q, sid)
+            loss = _geo_moe_loss(pred_d, td, gate_logit, tr, s_d_tensor)
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
 
         model.eval()
-        v_losses = []
+        v_losses: list[float] = []
         with torch.no_grad():
-            for h, q, sid, rp, td, tr in val_loader:
-                h, q = h.to(device), q.to(device)
-                sid, rp = sid.to(device), rp.to(device)
-                td, tr = td.to(device), tr.to(device)
-                pd_d, _ = model(h, q, sid, rp)
-                v_losses.append(nn.functional.smooth_l1_loss(pd_d, td, beta=1.0).item())
+            for h, q, sid, td, _ in val_loader:
+                pred_d, _, _ = model(h.to(device), q.to(device), sid.to(device))
+                v_losses.append(
+                    nn.functional.smooth_l1_loss(pred_d, td.to(device), beta=1.0).item()
+                )
         vl = float(np.mean(v_losses))
         if vl < best_val_loss - 1e-4:
             best_val_loss = vl
-            best_epoch = epoch
-            stale = 0
+            best_epoch    = epoch
+            stale         = 0
         else:
             stale += 1
         if stale >= 25:
             break
 
-    # Retrain on all available training examples for best_epoch
-    all_tensors = tuple((torch.cat([tr_tensors[i], val_tensors[i]], dim=0) for i in range(len(tr_tensors))))
-    all_loader = DataLoader(TensorDataset(*all_tensors), batch_size=32, shuffle=True)
+    # Retrain on all data for best_epoch
+    all_tensors = tuple(torch.cat([tr_tensors[i], val_tensors[i]], dim=0) for i in range(len(tr_tensors)))
+    all_loader  = DataLoader(TensorDataset(*all_tensors), batch_size=32, shuffle=True)
     seed_everything(SEED)
-    final_model = GEORegimeAwareResidualModel(tr_tensors[0].shape[-1], tr_tensors[1].shape[-1], len(datasets)).to(device)
+    final_model = make_model()
     final_optimizer = torch.optim.AdamW(final_model.parameters(), lr=0.001, weight_decay=0.0001)
     final_model.train()
     for _ in range(best_epoch):
-        for h, q, sid, rp, td, tr in all_loader:
-            h, q = h.to(device), q.to(device)
-            sid, rp = sid.to(device), rp.to(device)
+        for h, q, sid, td, tr in all_loader:
+            h, q   = h.to(device), q.to(device)
+            sid    = sid.to(device)
             td, tr = td.to(device), tr.to(device)
             final_optimizer.zero_grad(set_to_none=True)
-            pd_d, pd_r = final_model(h, q, sid, rp)
-            huber = nn.functional.smooth_l1_loss(pd_d, td, beta=1.0)
-            amp = torch.norm(td, dim=-1, keepdim=True)
-            weights = 1.0 + 1.5 * torch.clamp(amp, max=3.0) / 3.0
-            weighted_mse = torch.mean(weights * (pd_d - td) ** 2)
-            bce = nn.functional.binary_cross_entropy_with_logits(pd_r, tr)
-            loss = huber + 0.1 * weighted_mse + 0.05 * bce
+            pred_d, gate_logit, _ = final_model(h, q, sid)
+            loss = _geo_moe_loss(pred_d, td, gate_logit, tr, s_d_tensor)
             loss.backward()
             nn.utils.clip_grad_norm_(final_model.parameters(), 1.0)
             final_optimizer.step()
     final_model.eval()
 
+    # Rolling backtest on GEO training data only — for architecture validation.
+    # Never uses Day-8 actuals.
+    geo_item = datasets['GEO']
+    backtest_results = _rolling_backtest_geo(
+        geo_item['train'], geo_item['origin'],
+        baselines['GEO'], detectors['GEO'],
+        delta_scalers['GEO'][0], delta_scalers['GEO'][1],
+        final_model, device,
+    )
+    print(f"  [GEO MoE Backtest] aggregate: MAE={backtest_results['aggregate']['mean_mae_m']:.4f}m  "
+          f"W={backtest_results['aggregate']['mean_shapiro_w']:.4f}")
+
+    # Official Day-8 inference — strictly causal
     predictions: dict[str, np.ndarray] = {}
     diagnostics: dict[tuple[str, int], dict[str, Any]] = {}
 
     for name, item in datasets.items():
-        frame = item['train']
-        test = item['test']
-        origin = item['origin']
+        frame    = item['train']
+        test     = item['test']
+        origin   = item['origin']
         c_d, s_d = delta_scalers[name]
-        cutoff = len(frame) - 1
+        cutoff   = len(frame) - 1  # last training observation
 
-        test_hists, test_qs, test_sids, test_rps, test_bases = [], [], [], [], []
-        meta_list = []
+        test_hists, test_qs, test_sids, test_bases = [], [], [], []
+        meta_list: list[tuple[float, float, float, float]] = []
 
         for row_idx, query_time in enumerate(test['utc_time']):
+            # Each query uses the same training tail cutoff (no future feedback).
+            # p_gate varies across queries because query features (lead_time, phase) differ.
             hist, meta = _physical_history_tensor(frame, cutoff, query_time, origin, baselines[name], c_d, s_d)
+            rms    = float(np.sqrt(np.mean(meta['orbit_norms'][-4:] ** 2)))
+            flips  = float(np.mean(np.diff(np.sign(meta['vals'][:, 0])) != 0)) if len(meta['vals']) > 1 else 0.0
             r_prob = _compute_regime_probability(meta['orbit_norms'], detectors[name])
-            rms = float(np.sqrt(np.mean(meta['orbit_norms'][-4:] ** 2)))
-            flips = float(np.mean(np.diff(np.sign(meta['vals'][:, 0])) != 0)) if len(meta['vals']) > 1 else 0.0
             q_feat = _physical_query_features(query_time, frame['utc_time'].iloc[cutoff], origin, r_prob, rms, flips)
-            x_q = time_features(pd.Series([query_time]), origin)
-            b_q = baselines[name].predict(x_q)[0]
+            x_q    = time_features(pd.Series([query_time]), origin)
+            b_q    = baselines[name].predict(x_q)[0]
 
             test_hists.append(hist)
             test_qs.append(q_feat)
             test_sids.append(item['series_index'])
-            test_rps.append(r_prob)
             test_bases.append(b_q)
-            meta_list.append((r_prob, meta['history_span_hours'], (query_time - frame['utc_time'].iloc[cutoff]).total_seconds() / 3600.0))
+            lead_h = (query_time - frame['utc_time'].iloc[cutoff]).total_seconds() / 3600.0
+            meta_list.append((r_prob, meta['history_span_hours'], lead_h, meta['last_3d_norm']))
 
         with torch.no_grad():
-            t_h = torch.as_tensor(np.array(test_hists), dtype=torch.float32, device=device)
-            t_q = torch.as_tensor(np.array(test_qs), dtype=torch.float32, device=device)
-            t_sid = torch.as_tensor(np.array(test_sids), dtype=torch.long, device=device)
-            t_rp = torch.as_tensor(np.array(test_rps), dtype=torch.float32, device=device)
-            pred_d, _ = final_model(t_h, t_q, t_sid, t_rp)
+            t_h    = torch.as_tensor(np.array(test_hists), dtype=torch.float32, device=device)
+            t_q    = torch.as_tensor(np.array(test_qs),   dtype=torch.float32, device=device)
+            t_sid  = torch.as_tensor(np.array(test_sids), dtype=torch.long,    device=device)
+            pred_d, _, t_gate = final_model(t_h, t_q, t_sid)
             delta_phys = pred_d.cpu().numpy() * s_d + c_d
-            pred_phys = np.array(test_bases) + delta_phys
+            gate_vals  = t_gate.cpu().numpy().squeeze(-1)   # p_gate per query
 
+        pred_phys = np.array(test_bases) + delta_phys
         predictions[name] = pred_phys
 
         for row_idx in range(len(test)):
             b_val = test_bases[row_idx]
             d_val = delta_phys[row_idx]
-            rp_val, span_val, lead_val = meta_list[row_idx]
+            r_prob, span_h, lead_h, last_norm = meta_list[row_idx]
             diagnostics[(name, row_idx)] = {
-                'baseline_x_error_m': float(b_val[0]),
-                'baseline_y_error_m': float(b_val[1]),
-                'baseline_z_error_m': float(b_val[2]),
+                'baseline_x_error_m':     float(b_val[0]),
+                'baseline_y_error_m':     float(b_val[1]),
+                'baseline_z_error_m':     float(b_val[2]),
                 'baseline_clock_error_m': float(b_val[3]),
-                'delta_x_error_m': float(d_val[0]),
-                'delta_y_error_m': float(d_val[1]),
-                'delta_z_error_m': float(d_val[2]),
-                'delta_clock_error_m': float(d_val[3]),
-                'regime_probability': float(rp_val),
-                'lead_time_hours': float(lead_val),
-                'history_span_hours': float(span_val),
+                'delta_x_error_m':        float(d_val[0]),
+                'delta_y_error_m':        float(d_val[1]),
+                'delta_z_error_m':        float(d_val[2]),
+                'delta_clock_error_m':    float(d_val[3]),
+                # p_gate is query-conditional (varies by lead_time/phase via GRU).
+                # It is NOT a live target-value detector; it reflects learned history state.
+                'p_gate':             float(gate_vals[row_idx]),
+                'regime_probability': r_prob,   # historical causal RMS-based estimate
+                'lead_time_hours':    float(lead_h),
+                'history_span_hours': float(span_h),
+                'last_3d_norm_m':     float(last_norm),
             }
 
     torch.save(
         {
-            'state_dict': final_model.state_dict(),
-            'best_epoch': best_epoch,
+            'state_dict':    final_model.state_dict(),
+            'best_epoch':    best_epoch,
             'best_val_loss': best_val_loss,
             'delta_scalers': delta_scalers,
-            'detectors': detectors,
-            'targets': TARGETS,
-            'seed': SEED,
+            'detectors':     detectors,
+            'backtest':      backtest_results,
+            'targets':       TARGETS,
+            'seed':          SEED,
         },
-        output_dir / 'geo_regime_aware_residual_day8.pt',
+        output_dir / 'geo_gated_moe_day8.pt',
     )
     return predictions, diagnostics
 
@@ -789,7 +993,7 @@ def save_predictions(
     diag_keys = [
         'baseline_x_error_m', 'baseline_y_error_m', 'baseline_z_error_m', 'baseline_clock_error_m',
         'delta_x_error_m', 'delta_y_error_m', 'delta_z_error_m', 'delta_clock_error_m',
-        'regime_probability', 'lead_time_hours', 'history_span_hours'
+        'p_gate', 'regime_probability', 'lead_time_hours', 'history_span_hours', 'last_3d_norm_m',
     ]
     for model_name, predictions in all_predictions.items():
         model_diag = diagnostics.get(model_name) if diagnostics is not None else None
@@ -938,16 +1142,18 @@ def generate_geo_diagnostics(
     pd.DataFrame(err_rows).to_csv(geo_diag_dir / 'geo_error_by_time.csv', index=False)
 
     # 5. geo_regime_diagnostics.csv
-    new_diag = diagnostics.get('GEO Regime-Aware Residual', {})
+    new_diag = diagnostics.get('GEO Gated MoE', {})
     regime_rows = []
     for row_idx, t in enumerate(geo_test['utc_time']):
         d_val = new_diag.get(('GEO', row_idx), {})
         regime_rows.append({
             'utc_time': str(t),
             'actual_3d_norm_m': float(np.sqrt(np.sum(actual_geo[row_idx, :3] ** 2))),
+            'p_gate': d_val.get('p_gate', np.nan),
             'regime_probability': d_val.get('regime_probability', np.nan),
             'lead_time_hours': d_val.get('lead_time_hours', np.nan),
             'history_span_hours': d_val.get('history_span_hours', np.nan),
+            'last_3d_norm_m': d_val.get('last_3d_norm_m', np.nan),
             'delta_x_error_m': d_val.get('delta_x_error_m', np.nan),
             'delta_y_error_m': d_val.get('delta_y_error_m', np.nan),
             'delta_z_error_m': d_val.get('delta_z_error_m', np.nan),
@@ -958,14 +1164,14 @@ def generate_geo_diagnostics(
     # Plot 1: Actual vs Predicted Components
     fig, axes = plt.subplots(4, 1, figsize=(14, 12), sharex=True)
     times = pd.to_datetime(geo_test['utc_time'])
-    regime_pred = all_predictions['GEO Regime-Aware Residual']['GEO']
+    regime_pred = all_predictions['GEO Gated MoE']['GEO']
     bilstm_pred = all_predictions['BiLSTM-GRU']['GEO']
     harmonic_pred = all_predictions['Harmonic Ridge']['GEO']
     for i, target in enumerate(TARGETS):
         axes[i].plot(times, actual_geo[:, i], 'k-', label='Actual', lw=2.0)
-        axes[i].plot(times, regime_pred[:, i], 'r.-', label='GEO Regime-Aware Residual', lw=1.5)
+        axes[i].plot(times, regime_pred[:, i], 'r.-', label='GEO Gated MoE', lw=1.5)
         axes[i].plot(times, harmonic_pred[:, i], 'b--', label='Harmonic Ridge', lw=1.2, alpha=0.7)
-        axes[i].plot(times, bilstm_pred[:, i], 'g:', label='BiLSTM-GRU (collapsed)', lw=1.2, alpha=0.7)
+        axes[i].plot(times, bilstm_pred[:, i], 'g:', label='BiLSTM-GRU', lw=1.2, alpha=0.7)
         axes[i].set_ylabel(f'{TARGET_LABELS[target]} (m)')
         axes[i].grid(True, alpha=0.25)
         if i == 0:
@@ -979,7 +1185,7 @@ def generate_geo_diagnostics(
     # Plot 2: Residuals vs Time
     fig, axes = plt.subplots(4, 1, figsize=(14, 12), sharex=True)
     for i, target in enumerate(TARGETS):
-        axes[i].plot(times, regime_pred[:, i] - actual_geo[:, i], 'r.-', label='GEO Regime-Aware Residual', lw=1.5)
+        axes[i].plot(times, regime_pred[:, i] - actual_geo[:, i], 'r.-', label='GEO Gated MoE', lw=1.5)
         axes[i].plot(times, harmonic_pred[:, i] - actual_geo[:, i], 'b--', label='Harmonic Ridge', lw=1.2, alpha=0.7)
         axes[i].plot(times, bilstm_pred[:, i] - actual_geo[:, i], 'g:', label='BiLSTM-GRU', lw=1.2, alpha=0.7)
         axes[i].axhline(0, color='gray', linestyle='--', alpha=0.5)
@@ -998,7 +1204,7 @@ def generate_geo_diagnostics(
     act_norm = np.sqrt(np.sum(actual_geo[:, :3] ** 2, axis=1))
     regime_norm = np.sqrt(np.sum(regime_pred[:, :3] ** 2, axis=1))
     bilstm_norm = np.sqrt(np.sum(bilstm_pred[:, :3] ** 2, axis=1))
-    ax.scatter(act_norm, regime_norm, color='red', alpha=0.7, label='GEO Regime-Aware Residual')
+    ax.scatter(act_norm, regime_norm, color='red', alpha=0.7, label='GEO Gated MoE')
     ax.scatter(act_norm, bilstm_norm, color='green', alpha=0.5, label='BiLSTM-GRU (collapsed near ~0.3m)')
     lim = max(act_norm.max(), regime_norm.max()) * 1.05
     ax.plot([0, lim], [0, lim], 'k--', alpha=0.6, label='Ideal 1:1')
@@ -1013,12 +1219,13 @@ def generate_geo_diagnostics(
 
     # Plot 4: Regime Probability vs Time
     fig, ax = plt.subplots(figsize=(12, 5))
-    probs = [d_val.get('regime_probability', 0.5) for d_val in (new_diag.get(('GEO', idx), {}) for idx in range(len(geo_test)))]
-    ax.plot(times, probs, 'm.-', label='Soft Regime Anomaly Probability $p_{regime}$', lw=2.0)
-    ax.axhline(0.5, color='gray', linestyle='--', alpha=0.6, label='Threshold 0.5')
-    ax.set_ylabel('Regime Probability')
+    # p_gate is learned (query-conditional via GRU), not a static thresholded detector.
+    p_gates = [d_val.get('p_gate', 0.5) for d_val in (new_diag.get(('GEO', idx), {}) for idx in range(len(geo_test)))]
+    ax.plot(times, p_gates, 'm.-', label='Learned Regime Gate $p_{gate}$', lw=2.0)
+    ax.axhline(0.5, color='gray', linestyle='--', alpha=0.6, label='Decision boundary 0.5')
+    ax.set_ylabel('p_gate (regime gate probability)')
     ax.set_xlabel('UTC Time (Day 8)')
-    ax.set_title('GEO Day-8: Dynamic Regime Anomaly Detector over Time', fontweight='bold')
+    ax.set_title('GEO Day-8: Learned Regime Gate $p_{gate}$ over Time (GEO Gated MoE)', fontweight='bold')
     ax.grid(True, alpha=0.25)
     ax.legend(loc='upper right')
     fig.tight_layout()
@@ -1051,7 +1258,7 @@ def run_benchmark(data_dir: Path, output_dir: Path, max_epochs: int=180, device_
         ('Gaussian Process', lambda: predict_gaussian_process(datasets, output_dir)),
         ('BiLSTM-GRU', lambda: predict_neural(datasets, 'bilstm_gru', device, max_epochs, output_dir)),
         ('Transformer', lambda: predict_neural(datasets, 'transformer', device, max_epochs, output_dir)),
-        ('GEO Regime-Aware Residual', lambda: predict_geo_regime_aware(datasets, device, max_epochs, output_dir)),
+        ('GEO Gated MoE', lambda: predict_geo_gated_moe(datasets, device, max_epochs, output_dir)),
     ]
     all_predictions: dict[str, dict[str, np.ndarray]] = {}
     all_diagnostics: dict[str, dict[tuple[str, int], dict[str, Any]]] = {}
