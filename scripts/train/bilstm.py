@@ -10,14 +10,14 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from scripts.audit_data import audit_csv
-from src.artifacts import ARTIFACT_SCHEMA_VERSION, current_git_sha, scaler_to_state, set_reproducible_seed, sha256_file, write_json
-from src.baselines import generate_baseline_forecasts
-from src.config import DEFAULT_DATA_PATH, DEFAULT_OUTPUT_DIR, DEFAULT_SEED, FORECAST_HORIZON, HORIZON_MAP, SEQ_LEN, resolve_device
-from src.data import FastGPUTensorLoader, prepare_pytorch_datasets
-from src.evaluate import compare_candidate_to_baseline, compute_tensor_horizon_metrics, evaluate_forecasts
-from src.models.pytorch_bilstm import BiLSTMGRUPyTorchModel
-from src.visualize import plot_multihorizon_heatmap, plot_per_satellite_mae, plot_prediction_vs_actual, plot_residual_distributions, plot_residual_qq, plot_training_history
+from scripts.data.audit_data import audit_csv
+from neuronav.artifacts import ARTIFACT_SCHEMA_VERSION, current_git_sha, scaler_to_state, set_reproducible_seed, sha256_file, write_json
+from neuronav.baselines import generate_baseline_forecasts
+from neuronav.config import DEFAULT_DATA_PATH, DEFAULT_OUTPUT_DIR, DEFAULT_SEED, FORECAST_HORIZON, HORIZON_MAP, SEQ_LEN, resolve_device
+from neuronav.data import FastGPUTensorLoader, prepare_pytorch_datasets
+from neuronav.evaluation import compare_candidate_to_baseline, compute_tensor_horizon_metrics, evaluate_forecasts
+from neuronav.models.bilstm import BiLSTMGRUPyTorchModel
+from neuronav.visualization.scientific import plot_multihorizon_heatmap, plot_per_satellite_mae, plot_prediction_vs_actual, plot_residual_distributions, plot_residual_qq, plot_training_history
 
 def parse_args(argv: list[str] | None=None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Train the masked BiLSTM-GRU GNSS benchmark')

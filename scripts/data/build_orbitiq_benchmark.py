@@ -7,7 +7,7 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
-from scripts.audit_data import audit_csv
+from scripts.data.audit_data import audit_csv
 GM = 398600441800000.0
 OMEGA_E = 7.2921151467e-05
 SPEED_OF_LIGHT = 299792458.0
@@ -92,8 +92,8 @@ def generate_orbitiq_benchmark(data_dir: Path, output_path: Path, total_days: in
 
 def main():
     parser = argparse.ArgumentParser(description='Generate contract-compliant OrbitIQ benchmark dataset')
-    parser.add_argument('--data-dir', default='Data_PS-08', help='Directory with raw OrbitIQ CSVs')
-    parser.add_argument('--output', default='data_acquisition/ORBITIQ_BENCHMARK.csv', help='Destination CSV path')
+    parser.add_argument('--data-dir', default='research/ps08/data', help='Directory with raw OrbitIQ CSVs')
+    parser.add_argument('--output', default='data/benchmark/ORBITIQ_BENCHMARK.csv', help='Destination CSV path')
     args = parser.parse_args()
     data_dir = Path(args.data_dir)
     output_path = Path(args.output)

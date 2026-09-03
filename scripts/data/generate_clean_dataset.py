@@ -9,7 +9,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 import numpy as np
 import pandas as pd
-from scripts.audit_data import audit_csv
+from scripts.data.audit_data import audit_csv
 GM = 398600441800000.0
 OMEGA_E = 7.2921151467e-05
 CONSTELLATION_CONFIGS = {'G': {'name': 'GPS', 'type': 'MEO', 'semi_major_axis_m': 26559700.0, 'inclination_deg': 55.0, 'eccentricity': 0.01, 'orbit_err_scale_m': 1.2, 'clock_err_scale_s': 4.5e-09, 'sat_count': 8}, 'R': {'name': 'GLONASS', 'type': 'MEO', 'semi_major_axis_m': 25510000.0, 'inclination_deg': 64.8, 'eccentricity': 0.005, 'orbit_err_scale_m': 1.8, 'clock_err_scale_s': 8e-09, 'sat_count': 6}, 'E': {'name': 'Galileo', 'type': 'MEO', 'semi_major_axis_m': 29600000.0, 'inclination_deg': 56.0, 'eccentricity': 0.002, 'orbit_err_scale_m': 0.8, 'clock_err_scale_s': 2e-09, 'sat_count': 6}, 'I': {'name': 'NavIC', 'type': 'GEO_GSO', 'semi_major_axis_m': 42164000.0, 'inclination_deg': 29.0, 'eccentricity': 0.001, 'orbit_err_scale_m': 2.2, 'clock_err_scale_s': 6e-09, 'sat_count': 7}}
@@ -96,7 +96,7 @@ def generate_benchmark_dataset(output_path: Path, days: int=8, constellations: l
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='Generate clean, physics-based Multi-GNSS benchmark dataset')
-    parser.add_argument('--out', default='data_acquisition/CLEAN_GNSS_BENCHMARK.csv')
+    parser.add_argument('--out', default='data/benchmark/CLEAN_GNSS_BENCHMARK.csv')
     parser.add_argument('--days', type=int, default=8, help='Number of 24h days (default: 8)')
     parser.add_argument('--constellations', nargs='+', default=['G', 'R'], help='Constellations: G, R, E, I')
     args = parser.parse_args()

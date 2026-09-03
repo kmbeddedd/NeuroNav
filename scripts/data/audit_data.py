@@ -6,8 +6,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import numpy as np
 import pandas as pd
-from src.artifacts import sha256_file, write_json
-from src.config import DEFAULT_DATA_PATH
+from neuronav.artifacts import sha256_file, write_json
+from neuronav.config import DEFAULT_DATA_PATH
 
 def audit_csv(data_path: str, contract_path: str='configs/data_contract.json') -> dict:
     with open(contract_path, encoding='utf-8') as handle:

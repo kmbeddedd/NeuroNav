@@ -286,7 +286,7 @@ def generate_markdown_report(all_results: List[Dict[str, Any]], output_path: str
 
 def main():
     parser = argparse.ArgumentParser(description='Evaluate OrbitIQ GNSS Error Models')
-    parser.add_argument('--data-dir', type=str, default='Data_PS-08', help='Directory containing OrbitIQ datasets')
+    parser.add_argument('--data-dir', type=str, default='research/ps08/data', help='Directory containing OrbitIQ datasets')
     parser.add_argument('--models-dir', type=str, default='models/orbitiq_pretrained', help='Directory containing pretrained .h5 models and scalers')
     parser.add_argument('--output-dir', type=str, default='results/orbitiq_evaluation', help='Directory to store evaluation reports')
     parser.add_argument('--all', action='store_true', help='Evaluate all available datasets (GEO, MEO, MEO2)')

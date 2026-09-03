@@ -13,7 +13,7 @@ import matplotlib
 import numpy as np
 import pandas as pd
 import torch
-from src.config import resolve_device
+from neuronav.config import resolve_device
 from scipy import stats
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.gaussian_process import GaussianProcessRegressor
@@ -1042,7 +1042,7 @@ def write_markdown(report: dict[str, Any], path: Path) -> None:
         '',
         'The published reference benchmark is W = 0.9810, p = 0.5840, hypothesis result = 0. This is a normality benchmark, not an accuracy threshold.',
         '',
-        '## Judge criteria captured from `Data_PS-08/Note.pdf`',
+        '## Judge criteria captured from `research/ps08/data/Note.pdf`',
         '',
         '1. Priority 1: average Shapiro–Wilk W over X, Y, Z and clock residuals; higher is better. Report p-values and the α=0.05 decision (0 = fail to reject normality, 1 = reject).',
         '2. Priority 2: residual mean and standard deviation break a Priority-1 tie.',
@@ -1283,7 +1283,7 @@ def run_benchmark(data_dir: Path, output_dir: Path, max_epochs: int=180, device_
 
     report = {
         'evaluation_protocol': {
-            'source': 'Data_PS-08/Note.pdf',
+            'source': 'research/ps08/data/Note.pdf',
             'train_policy': 'seven-day train files only',
             'test_policy': 'unique rows at supplied Day-8 arbitrary timestamps; no test feedback',
             'residual_definition': 'prediction - observation',
@@ -1333,7 +1333,7 @@ def run_benchmark(data_dir: Path, output_dir: Path, max_epochs: int=180, device_
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='Retrain and compare models on official PS-08 data')
-    parser.add_argument('--data-dir', type=Path, default=Path('Data_PS-08'))
+    parser.add_argument('--data-dir', type=Path, default=Path('research/ps08/data'))
     parser.add_argument('--output', type=Path, default=Path('results/ps08_day8'))
     parser.add_argument('--max-epochs', type=int, default=180)
     parser.add_argument('--device', choices=('auto', 'cpu', 'cuda'), default='auto')

@@ -11,18 +11,18 @@ import torch
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
-from scripts.audit_data import audit_csv
-from data_acquisition.build_orbitiq_benchmark import generate_orbitiq_benchmark
-from src.artifacts import set_reproducible_seed, write_json
-from src.baselines import generate_baseline_forecasts
-from src.calibration import conformal_interval, evaluate_conformal_intervals, fit_scaled_conformal
-from src.config import DEFAULT_SEED, DIFFUSION_DEFAULTS, FEATURE_COLS_PYTORCH, FORECAST_HORIZON, HORIZON_MAP, ORBITIQ_DATA_PATH, ORBITIQ_OUTPUT_DIR, SEQ_LEN, TARGET_COLS_4, TRANSFORMER_DEFAULTS, resolve_device
-from src.data import load_and_clean_data, prepare_pytorch_datasets
-from src.evaluate import compare_candidate_to_baseline, compute_tensor_horizon_metrics, evaluate_forecasts
-from src.models.losses import composite_transformer_loss
-from src.models.pytorch_bilstm import BiLSTMGRUPyTorchModel
-from src.models.pytorch_transformer import GNSSForecaster
-from src.visualize import plot_multihorizon_heatmap, plot_per_satellite_mae, plot_prediction_vs_actual, plot_residual_distributions, plot_residual_qq, plot_training_history
+from scripts.data.audit_data import audit_csv
+from scripts.data.build_orbitiq_benchmark import generate_orbitiq_benchmark
+from neuronav.artifacts import set_reproducible_seed, write_json
+from neuronav.baselines import generate_baseline_forecasts
+from neuronav.calibration import conformal_interval, evaluate_conformal_intervals, fit_scaled_conformal
+from neuronav.config import DEFAULT_SEED, DIFFUSION_DEFAULTS, FEATURE_COLS_PYTORCH, FORECAST_HORIZON, HORIZON_MAP, ORBITIQ_DATA_PATH, ORBITIQ_OUTPUT_DIR, SEQ_LEN, TARGET_COLS_4, TRANSFORMER_DEFAULTS, resolve_device
+from neuronav.data import load_and_clean_data, prepare_pytorch_datasets
+from neuronav.evaluation import compare_candidate_to_baseline, compute_tensor_horizon_metrics, evaluate_forecasts
+from neuronav.models.losses import composite_transformer_loss
+from neuronav.models.bilstm import BiLSTMGRUPyTorchModel
+from neuronav.models.transformer import GNSSForecaster
+from neuronav.visualization.scientific import plot_multihorizon_heatmap, plot_per_satellite_mae, plot_prediction_vs_actual, plot_residual_distributions, plot_residual_qq, plot_training_history
 
 def run_pipeline(raw_data_dir: Path, benchmark_path: Path, output_dir: Path, epochs: int=20, batch_size: int=32, lr: float=0.001, device_name: str='auto', seed: int=DEFAULT_SEED, skip_plots: bool=False) -> Dict[str, Any]:
     set_reproducible_seed(seed)
@@ -48,7 +48,7 @@ def run_pipeline(raw_data_dir: Path, benchmark_path: Path, output_dir: Path, epo
     y_test_phys = target_scaler.inverse_transform(bundle['Y_test'].reshape(-1, len(TARGET_COLS_4))).reshape(bundle['Y_test'].shape)
     mask_test = bundle['TARGET_MASK_test']
     print('\n[Step 3/5] Computing Classical & ML Baselines...')
-    from src.baselines import evaluate_baselines
+    from neuronav.baselines import evaluate_baselines
     target_indices = bundle['target_feature_indices']
     x_test_targets_scaled = bundle['X_test'][:, :, target_indices]
     x_test_targets_phys = target_scaler.inverse_transform(x_test_targets_scaled.reshape(-1, len(TARGET_COLS_4))).reshape(x_test_targets_scaled.shape)
@@ -187,7 +187,7 @@ def generate_summary_markdown(report: Dict[str, Any], output_path: Path):
 
 def main():
     parser = argparse.ArgumentParser(description='Run complete OrbitIQ GNSS pipeline')
-    parser.add_argument('--data-dir', default='Data_PS-08', help='Directory with raw OrbitIQ CSVs')
+    parser.add_argument('--data-dir', default='research/ps08/data', help='Directory with raw OrbitIQ CSVs')
     parser.add_argument('--benchmark', default=ORBITIQ_DATA_PATH, help='Path to write/read benchmark CSV')
     parser.add_argument('--output', default=ORBITIQ_OUTPUT_DIR, help='Directory to store pipeline artifacts')
     parser.add_argument('--epochs', type=int, default=20, help='Training epochs for neural models')
