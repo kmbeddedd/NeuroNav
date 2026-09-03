@@ -1,0 +1,65 @@
+{
+  "GEO": {
+    "train_rows": 142,
+    "test_rows": 69,
+    "sequences": 1,
+    "window": 12,
+    "final_training_mse_scaled": 0.2060270506602067,
+    "overall_mae_m": 8.962188728454294,
+    "overall_rmse_m": 15.929420606965751,
+    "mae_by_target_m": {
+      "x_error (m)": 9.280274104265224,
+      "y_error (m)": 12.482921901179033,
+      "z_error (m)": 7.509505257931961,
+      "satclockerror (m)": 6.576053650440956
+    },
+    "rmse_by_target_m": {
+      "x_error (m)": 14.475438958206787,
+      "y_error (m)": 20.665376708583942,
+      "z_error (m)": 11.262679831459412,
+      "satclockerror (m)": 15.860065541103015
+    }
+  },
+  "MEO": {
+    "train_rows": 90,
+    "test_rows": 11,
+    "sequences": 2,
+    "window": 12,
+    "final_training_mse_scaled": 0.1454102173447609,
+    "overall_mae_m": 0.2792789080104418,
+    "overall_rmse_m": 0.37148913924397775,
+    "mae_by_target_m": {
+      "x_error (m)": 0.20827925643835446,
+      "y_error (m)": 0.44403951278640535,
+      "z_error (m)": 0.36655980291721113,
+      "satclockerror (m)": 0.09823705989979614
+    },
+    "rmse_by_target_m": {
+      "x_error (m)": 0.22141505894594332,
+      "y_error (m)": 0.5628511316241638,
+      "z_error (m)": 0.41387139408181073,
+      "satclockerror (m)": 0.122070335327905
+    }
+  },
+  "MEO2": {
+    "train_rows": 244,
+    "test_rows": 30,
+    "sequences": 2,
+    "window": 12,
+    "final_training_mse_scaled": 0.17180669036778537,
+    "overall_mae_m": 0.10336701859816938,
+    "overall_rmse_m": 0.1631579701847548,
+    "mae_by_target_m": {
+      "x_error (m)": 0.1689718402195301,
+      "y_error (m)": 0.07465808485547985,
+      "z_error (m)": 0.1450122063883831,
+      "satclockerror (m)": 0.024825942929284396
+    },
+    "rmse_by_target_m": {
+      "x_error (m)": 0.24318964300783769,
+      "y_error (m)": 0.08395228048055309,
+      "z_error (m)": 0.19634453446015027,
+      "satclockerror (m)": 0.04173402523959553
+    }
+  }
+}
