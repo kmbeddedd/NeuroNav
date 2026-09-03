@@ -1,4 +1,10 @@
+-c requirements-lock.txt
 numpy
 pandas
+scipy
 scikit-learn
+matplotlib
 torch
+optuna
+tqdm
+openpyxl
