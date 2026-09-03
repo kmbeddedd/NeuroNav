@@ -315,15 +315,122 @@ def _resolve_split_boundaries(df: pd.DataFrame, input_window: int, forecast_hori
         raise ValueError('Training history before test is too short for disjoint train and validation forecast blocks.')
     return (pd.Timestamp(pretest[-val_steps]), test_start)
 
+def validate_temporal_windows(
+    parts: Dict[str, Dict[str, Any]],
+    validation_start: pd.Timestamp,
+    test_start: pd.Timestamp,
+    evaluation_mode: str = 'strict_block',
+) -> Dict[str, Any]:
+    """
+    Explicitly audits temporal integrity, causality, and out-of-sample purity across splits.
+    Raises ValueError if any temporal boundary, causality, or data leakage violation is detected.
+    """
+    if evaluation_mode not in ('strict_block', 'rolling'):
+        raise ValueError(f"evaluation_mode must be 'strict_block' or 'rolling', got {evaluation_mode!r}")
+
+    audit_results: Dict[str, Any] = {}
+    for split in ('train', 'val', 'test'):
+        inputs = parts[split].get('input_ts', [])
+        labels = parts[split].get('label_ts', [])
+        sat_ids = parts[split].get('satellite_id', [])
+        n_samples = len(inputs)
+        if n_samples == 0:
+            audit_results[split] = {'count': 0}
+            continue
+
+        for i in range(n_samples):
+            in_arr = np.asarray(inputs[i])
+            lbl_arr = np.asarray(labels[i])
+            in_ts = pd.to_datetime(in_arr)
+            lbl_ts = pd.to_datetime(lbl_arr)
+            sat_id = str(sat_ids[i]) if i < len(sat_ids) else 'unknown'
+
+            max_input = in_ts.max()
+            min_label = lbl_ts.min()
+            max_label = lbl_ts.max()
+
+            # Fundamental causal ordering within every window
+            if max_input > min_label:
+                raise ValueError(
+                    f"Temporal causality violation in {split} window {i} for satellite {sat_id}: "
+                    f"max(input)={max_input} > min(label)={min_label}."
+                )
+
+            # Train split constraints
+            if split == 'train':
+                if max_input >= validation_start:
+                    raise ValueError(
+                        f"Data leakage in train window {i} for satellite {sat_id}: "
+                        f"input timestamp {max_input} >= validation_start ({validation_start})."
+                    )
+                if max_label >= validation_start:
+                    raise ValueError(
+                        f"Data leakage in train window {i} for satellite {sat_id}: "
+                        f"label timestamp {max_label} >= validation_start ({validation_start})."
+                    )
+
+            # Validation split constraints
+            elif split == 'val':
+                if min_label < validation_start:
+                    raise ValueError(
+                        f"Validation window {i} for satellite {sat_id} has label timestamp {min_label} "
+                        f"< validation_start ({validation_start})."
+                    )
+                if max_label >= test_start:
+                    raise ValueError(
+                        f"Validation window {i} for satellite {sat_id} has label timestamp {max_label} "
+                        f">= test_start ({test_start})."
+                    )
+                if max_input >= test_start:
+                    raise ValueError(
+                        f"Validation window {i} for satellite {sat_id} has input timestamp {max_input} "
+                        f">= test_start ({test_start})."
+                    )
+
+            # Test split constraints
+            elif split == 'test':
+                if min_label < test_start:
+                    raise ValueError(
+                        f"Test window {i} for satellite {sat_id} has label timestamp {min_label} "
+                        f"< test_start ({test_start})."
+                    )
+                if evaluation_mode == 'strict_block':
+                    if max_input >= test_start:
+                        raise ValueError(
+                            f"Data leakage detected in test window {i} for satellite {sat_id}: "
+                            f"max(input)={max_input} is >= test_start ({test_start}). "
+                            f"In strict_block mode, all test inputs must be strictly before test_start."
+                        )
+                    overlap = set(in_ts.to_numpy()).intersection(set(lbl_ts.to_numpy()))
+                    if overlap:
+                        raise ValueError(
+                            f"Data leakage detected in test window {i} for satellite {sat_id}: "
+                            f"input and label timestamps overlap: {sorted(overlap)}."
+                        )
+
+        audit_results[split] = {
+            'count': n_samples,
+            'max_input': str(pd.to_datetime(inputs[-1]).max()),
+            'min_label': str(pd.to_datetime(labels[0]).min()),
+            'max_label': str(pd.to_datetime(labels[-1]).max()),
+            'causal': True,
+            'strict_out_of_sample': bool(split == 'test' and evaluation_mode == 'strict_block'),
+        }
+
+    return audit_results
+
+
 def _has_contiguous_training_window(sat_df: pd.DataFrame, validation_start: pd.Timestamp, input_window: int, forecast_horizon: int, interval: pd.Timedelta) -> bool:
     timestamps = sat_df.loc[sat_df['Timestamp'] < validation_start, 'Timestamp'].sort_values().to_numpy(dtype='datetime64[ns]')
     required = input_window + forecast_horizon
     return any((_is_contiguous(timestamps[start:start + required], interval) for start in range(len(timestamps) - required + 1)))
 
-def prepare_pytorch_datasets(data_path: str, input_window: int=SEQ_LEN, forecast_horizon: int=FORECAST_HORIZON, spike_threshold: float=SPIKE_THRESHOLD, batch_size: int=32, test_size: float=0.3, val_ratio: float=0.5, train_end_date: str=TRAIN_END_DATE, interval: str | pd.Timedelta=EXPECTED_INTERVAL, seed: int=DEFAULT_SEED, feature_cols: Optional[Sequence[str]]=None, include_physical_features: bool=True, orbit_class_column: str='Orbit_Class') -> Dict:
+def prepare_pytorch_datasets(data_path: str, input_window: int=SEQ_LEN, forecast_horizon: int=FORECAST_HORIZON, spike_threshold: float=SPIKE_THRESHOLD, batch_size: int=32, test_size: float=0.3, val_ratio: float=0.5, train_end_date: str=TRAIN_END_DATE, interval: str | pd.Timedelta=EXPECTED_INTERVAL, seed: int=DEFAULT_SEED, feature_cols: Optional[Sequence[str]]=None, include_physical_features: bool=True, orbit_class_column: str='Orbit_Class', evaluation_mode: str='strict_block') -> Dict:
     from torch.utils.data import DataLoader, Dataset
     if input_window <= 0 or forecast_horizon <= 0 or batch_size <= 0:
         raise ValueError('input_window, forecast_horizon, and batch_size must be positive.')
+    if evaluation_mode not in ('strict_block', 'rolling'):
+        raise ValueError(f"evaluation_mode must be 'strict_block' or 'rolling', got {evaluation_mode!r}.")
     expected = _as_interval(interval)
 
     class GNSSPyTorchDataset(Dataset):
@@ -394,7 +501,7 @@ def prepare_pytorch_datasets(data_path: str, input_window: int=SEQ_LEN, forecast
     working['_row'] = np.arange(len(working), dtype=np.int64)
     keys = ('X', 'Y', 'SAT', 'SPIKE', 'MASK', 'input_ts', 'label_ts', 'satellite_id')
     parts = {split: {key: [] for key in keys} for split in ('train', 'val', 'test')}
-    purged_boundary = skipped_gap = skipped_all_invalid = 0
+    purged_boundary = purged_leakage = skipped_gap = skipped_all_invalid = 0
     required = input_window + forecast_horizon
     for satellite_id, sat_df in working.groupby('Satellite_ID', sort=True):
         sat_df = sat_df.sort_values('Timestamp')
@@ -407,18 +514,28 @@ def prepare_pytorch_datasets(data_path: str, input_window: int=SEQ_LEN, forecast
                 continue
             input_rows = rows[start:start + input_window]
             label_rows = rows[start + input_window:stop]
+            input_ts = timestamps[start:start + input_window]
             label_ts = timestamps[start + input_window:stop]
             label_mask = row_mask[label_rows]
             if not label_mask.any():
                 skipped_all_invalid += 1
                 continue
+            input_start, input_end = (pd.Timestamp(input_ts[0]), pd.Timestamp(input_ts[-1]))
             label_start, label_end = (pd.Timestamp(label_ts[0]), pd.Timestamp(label_ts[-1]))
             if label_end < validation_start:
                 split = 'train'
             elif label_start >= validation_start and label_end < test_start:
                 split = 'val'
             elif label_start >= test_start:
-                split = 'test'
+                if evaluation_mode == 'strict_block':
+                    if input_end < test_start:
+                        split = 'test'
+                    else:
+                        purged_leakage += 1
+                        purged_boundary += 1
+                        continue
+                else:
+                    split = 'test'
             else:
                 purged_boundary += 1
                 continue
@@ -433,6 +550,15 @@ def prepare_pytorch_datasets(data_path: str, input_window: int=SEQ_LEN, forecast
             parts[split]['label_ts'].append(label_ts)
             parts[split]['satellite_id'].append(str(satellite_id))
 
+    temporal_audit = validate_temporal_windows(parts, validation_start, test_start, evaluation_mode=evaluation_mode)
+
+    print(f'  Evaluation mode       : {evaluation_mode}')
+    print(f'  Validation start      : {validation_start}')
+    print(f'  Test start            : {test_start}')
+    cutoff_desc = f'strictly before test start ({test_start})' if evaluation_mode == 'strict_block' else 'rolling'
+    print(f'  Test input cutoff     : {cutoff_desc}')
+    print(f'  Purged boundary       : {purged_boundary} (leakage cross-boundary={purged_leakage})')
+
     def pack(split: str) -> Dict[str, np.ndarray]:
         if not parts[split]['X']:
             raise ValueError(f'No {split} samples remain after cadence, target-mask, and chronological-boundary validation. Increase history or reduce windows.')
@@ -443,7 +569,20 @@ def prepare_pytorch_datasets(data_path: str, input_window: int=SEQ_LEN, forecast
     generator = torch.Generator().manual_seed(int(seed))
     loaders = {'train': DataLoader(datasets['train'], batch_size=batch_size, shuffle=True, pin_memory=pin_memory, generator=generator), 'val': DataLoader(datasets['val'], batch_size=batch_size, shuffle=False, pin_memory=pin_memory), 'test': DataLoader(datasets['test'], batch_size=batch_size, shuffle=False, pin_memory=pin_memory)}
     data_quality_report = {**cadence, 'source_rows': source_rows, 'sp3_clock_sentinel_rows': source_sentinel_rows, 'rows_retained': int(len(df)), 'rows_excluded_no_training_history': int(source_rows - len(df)), 'skipped_noncontiguous_windows': skipped_gap, 'skipped_all_invalid_target_windows': skipped_all_invalid, 'physical_feature_columns': [column for column in PHYSICAL_FEATURE_COLS if column in selected_feature_cols]}
-    split_metadata = {'interval_minutes': float(expected / pd.Timedelta(minutes=1)), 'validation_start': validation_start.isoformat(), 'test_start': test_start.isoformat(), 'scaler_fit_end_exclusive': validation_start.isoformat(), 'purge_steps': int(forecast_horizon - 1), 'purged_boundary_windows': purged_boundary, 'sample_counts': {split: int(len(data['X'])) for split, data in packed.items()}}
+    split_metadata = {
+        'evaluation_mode': evaluation_mode,
+        'interval_minutes': float(expected / pd.Timedelta(minutes=1)),
+        'validation_start': validation_start.isoformat(),
+        'test_start': test_start.isoformat(),
+        'strict_test_input_boundary': bool(evaluation_mode == 'strict_block'),
+        'test_input_cutoff': test_start.isoformat() if evaluation_mode == 'strict_block' else None,
+        'scaler_fit_end_exclusive': validation_start.isoformat(),
+        'purge_steps': int(forecast_horizon - 1),
+        'purged_boundary_windows': purged_boundary,
+        'purged_leakage_windows': purged_leakage,
+        'sample_counts': {split: int(len(data['X'])) for split, data in packed.items()},
+        'temporal_audit': temporal_audit,
+    }
     bundle: Dict[str, object] = {'train_loader': loaders['train'], 'val_loader': loaders['val'], 'test_loader': loaders['test'], 'feature_scaler': feature_scaler, 'target_scaler': target_scaler, 'sat_encoder': sat_encoder, 'satellite_classes': sat_encoder.classes_.tolist(), 'num_features': len(selected_feature_cols), 'num_satellites': len(sat_encoder.classes_), 'num_orbit_classes': len(orbit_class_classes), 'orbit_class_classes': orbit_class_classes, 'orbit_class_by_satellite': orbit_class_by_satellite, 'orbit_class_column': orbit_class_column if orbit_class_classes else None, 'output_dim': len(target_cols), 'feature_cols': selected_feature_cols, 'target_cols': target_cols, 'target_feature_indices': [selected_feature_cols.index(column) for column in target_cols], 'split_metadata': split_metadata, 'data_quality_report': data_quality_report}
     for split, data in packed.items():
         bundle[f'X_{split}'] = data['X']
