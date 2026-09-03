@@ -1,7 +1,7 @@
 from pathlib import Path
 import numpy as np
 import pandas as pd
-from scripts.benchmark_ps08 import TARGETS, evaluate_predictions, load_series
+from scripts.benchmark.benchmark_ps08 import TARGETS, evaluate_predictions, load_series
 
 def test_load_series_normalizes_headers_and_deduplicates(tmp_path: Path):
     path = tmp_path / 'sample.csv'

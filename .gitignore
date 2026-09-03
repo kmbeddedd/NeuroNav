@@ -21,21 +21,28 @@ build/
 dist/
 *.egg-info/
 
-# JavaScript dependencies, if a demo UI is added
-node_modules/
-
 # OS and editor junk
 .DS_Store
 Thumbs.db
 Desktop.ini
 *.swp
+*.bak
+*.tmp
+.idea/
+.vscode/
 
-# Local archives
+# Local archives and scratch
 *.zip
 *.rar
+*.tar.gz
+scratch/
+scratch_*.txt
 
-# Scratch runs; curated benchmark artifacts under results/ remain trackable
-results/local/
+# Generated experiment outputs and research artifacts
+results/
+research/ps08/results/
 
-# Local agent configuration
-.agents/
+# Explicitly track deployment model bundles
+!models/deploy/
+!models/deploy/**/*.pt
+!models/deploy/**/*.json

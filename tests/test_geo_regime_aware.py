@@ -18,7 +18,7 @@ import pandas as pd
 import pytest
 import torch
 
-from scripts.benchmark_ps08 import (
+from scripts.benchmark.benchmark_ps08 import (
     TARGETS,
     _compute_regime_probability,
     _fit_causal_baseline,
@@ -237,7 +237,7 @@ def test_f_irregular_history():
 # All six legacy PS-08 models still execute.
 # ---------------------------------------------------------------------------
 def test_g_official_benchmark_remains_intact():
-    from scripts.benchmark_ps08 import run_benchmark
+    from scripts.benchmark.benchmark_ps08 import run_benchmark
     import inspect
 
     source = inspect.getsource(run_benchmark)
@@ -307,7 +307,7 @@ def test_h_model_identity(tmp_path: Path):
 # The new GEOGatedMoEModel.forward must return exactly 3 tensors.
 # ---------------------------------------------------------------------------
 def test_i_model_returns_three_values():
-    from scripts.benchmark_ps08 import GEOGatedMoEModel
+    from scripts.benchmark.benchmark_ps08 import GEOGatedMoEModel
     model = GEOGatedMoEModel(history_dim=19, query_dim=13, num_series=3)
     model.eval()
     B = 4
@@ -328,7 +328,7 @@ def test_i_model_returns_three_values():
 # Sigmoid output must be strictly bounded.
 # ---------------------------------------------------------------------------
 def test_j_p_gate_bounded():
-    from scripts.benchmark_ps08 import GEOGatedMoEModel
+    from scripts.benchmark.benchmark_ps08 import GEOGatedMoEModel
     torch.manual_seed(0)
     model = GEOGatedMoEModel(history_dim=19, query_dim=13, num_series=3)
     model.eval()
@@ -348,7 +348,7 @@ def test_j_p_gate_bounded():
 # a dormant auxiliary variable.
 # ---------------------------------------------------------------------------
 def test_k_gate_controls_prediction():
-    from scripts.benchmark_ps08 import GEOGatedMoEModel
+    from scripts.benchmark.benchmark_ps08 import GEOGatedMoEModel
     import copy
     torch.manual_seed(42)
     model = GEOGatedMoEModel(history_dim=19, query_dim=13, num_series=3)
@@ -389,7 +389,7 @@ def test_k_gate_controls_prediction():
 # Verifies that the architecture has genuinely separate expert outputs.
 # ---------------------------------------------------------------------------
 def test_l_expert_heads_distinct():
-    from scripts.benchmark_ps08 import GEOGatedMoEModel
+    from scripts.benchmark.benchmark_ps08 import GEOGatedMoEModel
     model = GEOGatedMoEModel(history_dim=19, query_dim=13, num_series=3)
     normal_params    = sum(p.numel() for p in model.normal_head.parameters())
     excursion_params = sum(p.numel() for p in model.excursion_head.parameters())
@@ -406,7 +406,7 @@ def test_l_expert_heads_distinct():
 # The gate must participate in the computational graph (no stop_gradient).
 # ---------------------------------------------------------------------------
 def test_m_gate_participates_in_gradient():
-    from scripts.benchmark_ps08 import GEOGatedMoEModel
+    from scripts.benchmark.benchmark_ps08 import GEOGatedMoEModel
     torch.manual_seed(0)
     model = GEOGatedMoEModel(history_dim=19, query_dim=13, num_series=3)
     model.train()
@@ -431,7 +431,7 @@ def test_m_gate_participates_in_gradient():
 # Existing tests that import GEORegimeAwareResidualModel must not break.
 # ---------------------------------------------------------------------------
 def test_n_backward_compatible_alias():
-    from scripts.benchmark_ps08 import GEOGatedMoEModel, GEORegimeAwareResidualModel
+    from scripts.benchmark.benchmark_ps08 import GEOGatedMoEModel, GEORegimeAwareResidualModel
     assert GEORegimeAwareResidualModel is GEOGatedMoEModel, (
         "GEORegimeAwareResidualModel must be an alias for GEOGatedMoEModel"
     )

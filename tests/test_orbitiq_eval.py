@@ -3,8 +3,8 @@ import sys
 import json
 import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from scripts.evaluate_orbitiq import preprocess_data, evaluate_orbitiq_dataset, FEATURE_COLUMNS
-DATA_DIR = Path('Data_PS-08')
+from scripts.evaluate.evaluate_orbitiq import preprocess_data, evaluate_orbitiq_dataset, FEATURE_COLUMNS
+DATA_DIR = Path('research/ps08/data')
 
 def test_orbitiq_data_files_exist():
     assert (DATA_DIR / 'DATA_GEO_Train.csv').exists()

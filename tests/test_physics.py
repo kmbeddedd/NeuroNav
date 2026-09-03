@@ -1,5 +1,5 @@
 import numpy as np
-from src.physics import ecef_error_to_ric, ric_basis, ric_error_to_ecef
+from neuronav.physics import ecef_error_to_ric, ric_basis, ric_error_to_ecef
 
 def test_ric_basis_is_orthonormal_and_round_trips():
     position = np.array([[26000000.0, 1000000.0, 4000000.0]])

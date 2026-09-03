@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 import numpy as np
 from scipy.stats import t as student_t_distribution
-from src.evaluate import SPEED_OF_LIGHT_M_S, PromotionGateError, assert_candidate_beats_baseline, compare_candidate_to_baseline, compute_aggregate_metrics, compute_probabilistic_metrics, compute_residual_normality, compute_sample_metrics, compute_skill_score, compute_tensor_horizon_metrics, evaluate_forecasts, save_metrics_summary
+from neuronav.evaluation import SPEED_OF_LIGHT_M_S, PromotionGateError, assert_candidate_beats_baseline, compare_candidate_to_baseline, compute_aggregate_metrics, compute_probabilistic_metrics, compute_residual_normality, compute_sample_metrics, compute_skill_score, compute_tensor_horizon_metrics, evaluate_forecasts, save_metrics_summary
 TARGETS = ['Error_X', 'Error_Y', 'Error_Z', 'Error_Clock']
 
 class DeterministicEvaluationTests(unittest.TestCase):

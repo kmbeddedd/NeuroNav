@@ -1,10 +1,7 @@
--c requirements-lock.txt
-numpy
-pandas
-scipy
-scikit-learn
-matplotlib
-torch
-optuna
-tqdm
-openpyxl
+numpy>=1.26.0
+pandas>=2.1.0
+scipy>=1.11.0
+scikit-learn>=1.4.0
+matplotlib>=3.8.0
+torch>=2.2.0
+h5py>=3.10.0
