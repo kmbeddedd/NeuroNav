@@ -3,7 +3,7 @@ import os
 import sys
 import threading
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Callable
+from typing import Optional, List, Dict, Any
 
 # Ensure project root in sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -18,7 +18,7 @@ import numpy as np
 import matplotlib
 matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from scipy import stats
 
 from src.gui_engine import (
@@ -32,314 +32,53 @@ from src.gui_engine import (
 )
 
 # -----------------------------------------------------------------------------
-# Aerospace & Mission-Control Design System (Palantir / Datadog Aesthetic)
+# Black & White (Monochrome) Design System & Times New Roman Typography
 # -----------------------------------------------------------------------------
-AERO_THEME = {
-    'bg_app': '#0B0E14',          # Deep Space Base Obsidian
-    'bg_surface': '#141821',      # Elevated Panel / Card Surface
-    'bg_surface_alt': '#181E2A',  # Secondary Surface / Alternating Row
-    'bg_header': '#10141D',       # Persistent Top Navigation Bar
-    'bg_input': '#10141D',        # Input Field & Dropdown Surface
-    'border': '#252B38',          # Subtle 1px Technical Border
-    'border_focus': '#0EA5E9',    # Active Border / Glow
-    'fg_primary': '#E4E7EC',      # Crisp Off-White Body / Primary Text
-    'fg_secondary': '#8B93A7',    # Muted Cool Gray Labels & Subtitles
-    'fg_muted': '#4B5565',        # Deep Telemetry / Inactive Gray
-    'accent': '#0EA5E9',          # Primary Aerospace Cyan
-    'accent_hover': '#0284C7',    # Hover Accent State
-    'accent_glow': '#38BDF8',     # Cyan Luminous Accent
-    'accent_dark': '#0C4A6E',     # Deep Navy Accent Fill
-    'success': '#22C55E',         # Emerald Pass
-    'success_bg': '#052E16',      # Dark Emerald Pill Fill
-    'error': '#EF4444',           # Coral Reject
-    'error_bg': '#450A0A',        # Dark Coral Pill Fill
-    'warning': '#F59E0B',         # Telemetry Warning Amber
-    'table_header': '#1E2533',    # Elevated Sticky Header Row
-    'table_even': '#141821',      # Zebra Striping Even
-    'table_odd': '#181E2A',       # Zebra Striping Odd
-    'table_select': '#0C4A6E',    # Table Row Active Select
+FONT_FAMILY = "Times New Roman"
+FONT_TITLE = (FONT_FAMILY, 22, "bold")
+FONT_HEADING = (FONT_FAMILY, 17, "bold")
+FONT_SUBHEADING = (FONT_FAMILY, 15, "bold")
+FONT_BODY = (FONT_FAMILY, 15)
+FONT_BODY_BOLD = (FONT_FAMILY, 15, "bold")
+FONT_SMALL = (FONT_FAMILY, 13)
+FONT_TABLE_HEAD = (FONT_FAMILY, 14, "bold")
+FONT_TABLE_ROW = (FONT_FAMILY, 13)
+
+BW_THEME = {
+    'bg_app': '#000000',          # Pure Black
+    'bg_surface': '#111111',      # Dark Charcoal Card
+    'bg_surface_alt': '#1c1c1c',  # Secondary Surface / Banner
+    'bg_input': '#080808',        # Input field background
+    'border': '#444444',          # Subtle Card Borders
+    'border_light': '#ffffff',    # High-contrast White Border
+    'fg_primary': '#ffffff',      # Pure White Text
+    'fg_secondary': '#cccccc',    # Silver / Soft White Text
+    'fg_muted': '#888888',        # Muted Gray
+    'btn_bg': '#ffffff',          # White Action Buttons
+    'btn_fg': '#000000',          # Black Text on White Buttons
+    'btn_alt_bg': '#222222',      # Dark Button
+    'btn_alt_fg': '#ffffff',      # White Text on Dark Button
+    'highlight': '#ffffff'        # Selection Highlight
 }
 
-FONT_UI = "Segoe UI"
-FONT_MONO = "Consolas"
-
-FONT_TITLE = (FONT_UI, 13, "bold")
-FONT_HEADING = (FONT_UI, 11, "bold")
-FONT_SUBHEADING = (FONT_UI, 10, "bold")
-FONT_BODY = (FONT_UI, 10)
-FONT_BODY_BOLD = (FONT_UI, 10, "bold")
-FONT_SMALL = (FONT_UI, 9)
-FONT_BADGE = (FONT_UI, 9, "bold")
-
-FONT_TABLE_HEAD = (FONT_UI, 10, "bold")
-FONT_TABLE_ROW = (FONT_MONO, 10)
-FONT_TABLE_ROW_BOLD = (FONT_MONO, 10, "bold")
-
-
-class AeroCard(tk.Canvas):
-    """Elevated aerospace card container with 10px rounded corners and subtle 1px border."""
-
-    def __init__(self, parent, bg_color=AERO_THEME['bg_surface'], border_color=AERO_THEME['border'],
-                 border_width=1, radius=10, inner_pad=14, **kwargs):
-        parent_bg = parent.cget('bg') if hasattr(parent, 'cget') and parent.cget('bg') else AERO_THEME['bg_app']
-        super().__init__(parent, bg=parent_bg, highlightthickness=0, **kwargs)
-        self.bg_color = bg_color
-        self.border_color = border_color
-        self.border_width = border_width
-        self.radius = radius
-        self.inner_pad = inner_pad
-        self.inner_frame = tk.Frame(self, bg=bg_color)
-        self.window_id = self.create_window(self.inner_pad, self.inner_pad, window=self.inner_frame, anchor='nw')
-        self.bind("<Configure>", self._on_resize)
-
-    def _on_resize(self, event):
-        self.delete("card_shape")
-        w, h = event.width, event.height
-        if w < 10 or h < 10:
-            return
-        r = self.radius
-        bw = self.border_width
-        d = 2 * r
-        x1, y1 = bw, bw
-        x2, y2 = w - bw, h - bw
-
-        if x2 > x1 + d and y2 > y1 + d:
-            # 4 Arcs
-            self.create_arc(x1, y1, x1 + d, y1 + d, start=90, extent=90, fill=self.bg_color, outline="", tags="card_shape")
-            self.create_arc(x2 - d, y1, x2, y1 + d, start=0, extent=90, fill=self.bg_color, outline="", tags="card_shape")
-            self.create_arc(x2 - d, y2 - d, x2, y2, start=270, extent=90, fill=self.bg_color, outline="", tags="card_shape")
-            self.create_arc(x1, y2 - d, x1 + d, y2, start=180, extent=90, fill=self.bg_color, outline="", tags="card_shape")
-            # Inner rects
-            self.create_rectangle(x1 + r, y1, x2 - r, y2, fill=self.bg_color, outline="", tags="card_shape")
-            self.create_rectangle(x1, y1 + r, x2, y2 - r, fill=self.bg_color, outline="", tags="card_shape")
-
-            # 1px Technical Border
-            if self.border_color and bw > 0:
-                self.create_arc(x1, y1, x1 + d, y1 + d, start=90, extent=90, style="arc", outline=self.border_color, width=bw, tags="card_shape")
-                self.create_arc(x2 - d, y1, x2, y1 + d, start=0, extent=90, style="arc", outline=self.border_color, width=bw, tags="card_shape")
-                self.create_arc(x2 - d, y2 - d, x2, y2, start=270, extent=90, style="arc", outline=self.border_color, width=bw, tags="card_shape")
-                self.create_arc(x1, y2 - d, x1 + d, y2, start=180, extent=90, style="arc", outline=self.border_color, width=bw, tags="card_shape")
-                self.create_line(x1 + r, y1, x2 - r, y1, fill=self.border_color, width=bw, tags="card_shape")
-                self.create_line(x2, y1 + r, x2, y2 - r, fill=self.border_color, width=bw, tags="card_shape")
-                self.create_line(x1 + r, y2, x2 - r, y2, fill=self.border_color, width=bw, tags="card_shape")
-                self.create_line(x1, y1 + r, x1, y2 - r, fill=self.border_color, width=bw, tags="card_shape")
-
-        inner_w = max(1, w - 2 * self.inner_pad)
-        inner_h = max(1, h - 2 * self.inner_pad)
-        self.coords(self.window_id, self.inner_pad, self.inner_pad)
-        self.itemconfigure(self.window_id, width=inner_w, height=inner_h)
-
-
-class AeroButton(tk.Canvas):
-    """High-contrast aerospace button with rounded edges, hover transitions, and status states."""
-
-    def __init__(self, parent, text="", command=None, variant="primary", radius=8,
-                 font=FONT_BODY_BOLD, height=36, width=None, **kwargs):
-        parent_bg = parent.cget('bg') if hasattr(parent, 'cget') and parent.cget('bg') else AERO_THEME['bg_surface']
-        super().__init__(parent, bg=parent_bg, highlightthickness=0, cursor="hand2", height=height, **kwargs)
-        if width:
-            self.configure(width=width)
-
-        self.text = text
-        self.command = command
-        self.variant = variant
-        self.radius = radius
-        self.btn_font = font
-        self.btn_state = "normal"
-
-        if variant == "primary":
-            self.bg_color = AERO_THEME['accent']
-            self.hover_bg = AERO_THEME['accent_hover']
-            self.fg_color = '#ffffff'
-            self.border_color = AERO_THEME['accent_glow']
-        elif variant == "secondary":
-            self.bg_color = AERO_THEME['bg_surface_alt']
-            self.hover_bg = AERO_THEME['border']
-            self.fg_color = AERO_THEME['fg_primary']
-            self.border_color = AERO_THEME['border']
-        elif variant == "ghost":
-            self.bg_color = 'transparent'
-            self.hover_bg = AERO_THEME['bg_surface_alt']
-            self.fg_color = AERO_THEME['fg_secondary']
-            self.border_color = None
-        else:
-            self.bg_color = AERO_THEME['bg_surface_alt']
-            self.hover_bg = AERO_THEME['border']
-            self.fg_color = AERO_THEME['fg_primary']
-            self.border_color = AERO_THEME['border']
-
-        self.current_bg = self.bg_color
-        self.bind("<Configure>", self._draw)
-        self.bind("<Button-1>", self._on_click)
-        self.bind("<Enter>", self._on_enter)
-        self.bind("<Leave>", self._on_leave)
-
-    def _draw(self, event=None):
-        self.delete("all")
-        w = self.winfo_width()
-        h = self.winfo_height()
-        if w < 10 or h < 10:
-            return
-        r = min(self.radius, h // 2, w // 2)
-        d = 2 * r
-        x1, y1 = 1, 1
-        x2, y2 = w - 1, h - 1
-
-        bg_draw = self.current_bg
-        if bg_draw != 'transparent':
-            self.create_arc(x1, y1, x1 + d, y1 + d, start=90, extent=90, fill=bg_draw, outline="")
-            self.create_arc(x2 - d, y1, x2, y1 + d, start=0, extent=90, fill=bg_draw, outline="")
-            self.create_arc(x2 - d, y2 - d, x2, y2, start=270, extent=90, fill=bg_draw, outline="")
-            self.create_arc(x1, y2 - d, x1 + d, y2, start=180, extent=90, fill=bg_draw, outline="")
-            self.create_rectangle(x1 + r, y1, x2 - r, y2, fill=bg_draw, outline="")
-            self.create_rectangle(x1, y1 + r, x2, y2 - r, fill=bg_draw, outline="")
-
-        if self.border_color and bg_draw != 'transparent':
-            self.create_arc(x1, y1, x1 + d, y1 + d, start=90, extent=90, style="arc", outline=self.border_color, width=1)
-            self.create_arc(x2 - d, y1, x2, y1 + d, start=0, extent=90, style="arc", outline=self.border_color, width=1)
-            self.create_arc(x2 - d, y2 - d, x2, y2, start=270, extent=90, style="arc", outline=self.border_color, width=1)
-            self.create_arc(x1, y2 - d, x1 + d, y2, start=180, extent=90, style="arc", outline=self.border_color, width=1)
-            self.create_line(x1 + r, y1, x2 - r, y1, fill=self.border_color, width=1)
-            self.create_line(x2, y1 + r, x2, y2 - r, fill=self.border_color, width=1)
-            self.create_line(x1 + r, y2, x2 - r, y2, fill=self.border_color, width=1)
-            self.create_line(x1, y1 + r, x1, y2 - r, fill=self.border_color, width=1)
-
-        fg = self.fg_color if self.btn_state != "disabled" else AERO_THEME['fg_muted']
-        self.create_text(w // 2, h // 2, text=self.text, fill=fg, font=self.btn_font)
-
-    def _on_enter(self, e):
-        if self.btn_state != "disabled":
-            self.current_bg = self.hover_bg
-            self._draw()
-
-    def _on_leave(self, e):
-        if self.btn_state != "disabled":
-            self.current_bg = self.bg_color
-            self._draw()
-
-    def _on_click(self, e):
-        if self.btn_state != "disabled" and self.command:
-            self.command()
-
-    def config_state(self, state: str):
-        self.btn_state = state
-        if state == "disabled":
-            self.current_bg = AERO_THEME['bg_surface_alt']
-            self.configure(cursor="arrow")
-        else:
-            self.current_bg = self.bg_color
-            self.configure(cursor="hand2")
-        self._draw()
-
-    def set_text(self, text: str):
-        self.text = text
-        self._draw()
-
-
-class AeroSegmentedControl(tk.Canvas):
-    """Pill-based segmented control replacing generic radio buttons with an aerospace feel."""
-
-    def __init__(self, parent, options: List[str], variable: tk.StringVar,
-                 on_change: Optional[Callable] = None, height=36, radius=8, **kwargs):
-        parent_bg = parent.cget('bg') if hasattr(parent, 'cget') and parent.cget('bg') else AERO_THEME['bg_surface']
-        super().__init__(parent, bg=parent_bg, highlightthickness=0, cursor="hand2", height=height, **kwargs)
-        self.options = options
-        self.variable = variable
-        self.on_change = on_change
-        self.radius = radius
-        self.segments_bounds: List[tuple] = []
-
-        self.bind("<Configure>", self._draw)
-        self.bind("<Button-1>", self._on_click)
-
-    def _draw(self, event=None):
-        self.delete("all")
-        w = self.winfo_width()
-        h = self.winfo_height()
-        if w < 10 or h < 10:
-            return
-
-        # Container Pill
-        r = self.radius
-        d = 2 * r
-        x1, y1 = 1, 1
-        x2, y2 = w - 1, h - 1
-
-        self.create_arc(x1, y1, x1 + d, y1 + d, start=90, extent=90, fill=AERO_THEME['bg_input'], outline="")
-        self.create_arc(x2 - d, y1, x2, y1 + d, start=0, extent=90, fill=AERO_THEME['bg_input'], outline="")
-        self.create_arc(x2 - d, y2 - d, x2, y2, start=270, extent=90, fill=AERO_THEME['bg_input'], outline="")
-        self.create_arc(x1, y2 - d, x1 + d, y2, start=180, extent=90, fill=AERO_THEME['bg_input'], outline="")
-        self.create_rectangle(x1 + r, y1, x2 - r, y2, fill=AERO_THEME['bg_input'], outline="")
-        self.create_rectangle(x1, y1 + r, x2, y2 - r, fill=AERO_THEME['bg_input'], outline="")
-
-        # 1px border
-        self.create_arc(x1, y1, x1 + d, y1 + d, start=90, extent=90, style="arc", outline=AERO_THEME['border'], width=1)
-        self.create_arc(x2 - d, y1, x2, y1 + d, start=0, extent=90, style="arc", outline=AERO_THEME['border'], width=1)
-        self.create_arc(x2 - d, y2 - d, x2, y2, start=270, extent=90, style="arc", outline=AERO_THEME['border'], width=1)
-        self.create_arc(x1, y2 - d, x1 + d, y2, start=180, extent=90, style="arc", outline=AERO_THEME['border'], width=1)
-        self.create_line(x1 + r, y1, x2 - r, y1, fill=AERO_THEME['border'], width=1)
-        self.create_line(x2, y1 + r, x2, y2 - r, fill=AERO_THEME['border'], width=1)
-        self.create_line(x1 + r, y2, x2 - r, y2, fill=AERO_THEME['border'], width=1)
-        self.create_line(x1, y1 + r, x1, y2 - r, fill=AERO_THEME['border'], width=1)
-
-        n = len(self.options)
-        seg_w = (w - 6) / n
-        self.segments_bounds = []
-
-        current_val = self.variable.get()
-
-        for idx, opt in enumerate(self.options):
-            sx1 = 3 + idx * seg_w
-            sx2 = sx1 + seg_w
-            sy1 = 3
-            sy2 = h - 3
-            self.segments_bounds.append((sx1, sx2, opt))
-
-            is_active = (opt == current_val)
-            if is_active:
-                # Active Pill with Cyan Glow
-                pr = min(r - 2, (sy2 - sy1) // 2)
-                pd_ = 2 * pr
-                self.create_arc(sx1, sy1, sx1 + pd_, sy1 + pd_, start=90, extent=90, fill=AERO_THEME['accent_hover'], outline="")
-                self.create_arc(sx2 - pd_, sy1, sx2, sy1 + pd_, start=0, extent=90, fill=AERO_THEME['accent_hover'], outline="")
-                self.create_arc(sx2 - pd_, sy2 - pd_, sx2, sy2, start=270, extent=90, fill=AERO_THEME['accent_hover'], outline="")
-                self.create_arc(sx1, sy2 - pd_, sx1 + pd_, sy2, start=180, extent=90, fill=AERO_THEME['accent_hover'], outline="")
-                self.create_rectangle(sx1 + pr, sy1, sx2 - pr, sy2, fill=AERO_THEME['accent_hover'], outline="")
-                self.create_rectangle(sx1, sy1 + pr, sx2, sy2 - pr, fill=AERO_THEME['accent_hover'], outline="")
-                txt_color = '#ffffff'
-                txt_font = FONT_BODY_BOLD
-            else:
-                txt_color = AERO_THEME['fg_secondary']
-                txt_font = FONT_BODY
-
-            self.create_text((sx1 + sx2) / 2, h / 2, text=opt, fill=txt_color, font=txt_font)
-
-    def _on_click(self, event):
-        x = event.x
-        for sx1, sx2, opt in self.segments_bounds:
-            if sx1 <= x <= sx2:
-                self.variable.set(opt)
-                self._draw()
-                if self.on_change:
-                    self.on_change()
-                break
+DEFAULT_SAMPLE_TRAIN = PROJECT_ROOT / 'Data_PS-08' / 'DATA_GEO_Train.csv'
+DEFAULT_SAMPLE_TEST = PROJECT_ROOT / 'Data_PS-08' / 'DATA_GEO_Test.csv'
 
 
 class NeuroNavApp(tk.Tk):
-    """Aerospace-grade Data-Science Mission-Control Dashboard for Satellite Error Forecasting."""
+    """3-Page Black & White NeuroNav GUI in Times New Roman (15pt)."""
 
     def __init__(self) -> None:
         super().__init__()
-        self.title("NeuroNav — Satellite Orbit & Clock Error Forecasting [Mission Control]")
-        self.geometry("1400x920")
-        self.minsize(1180, 780)
-        self.configure(bg=AERO_THEME['bg_app'])
+        self.title("NeuroNav — Satellite Orbit & Clock Error Forecasting")
+        self.geometry("1340x880")
+        self.minsize(1120, 750)
+        self.configure(bg=BW_THEME['bg_app'])
 
         # State Variables
-        self.current_page_idx = 1
         self.input_file_path: Optional[Path] = None
         self.input_df: Optional[pd.DataFrame] = None
-        self.input_file_type = tk.StringVar(value="Tabular CSV File (*.csv)")
+        self.input_file_type = tk.StringVar(value="csv")
         
         self.selected_model = tk.StringVar(value="Harmonic Ridge (PS-08 Winner)")
         self.detected_orbit = tk.StringVar(value="Auto-Detect (GEO)")
@@ -352,360 +91,280 @@ class NeuroNavApp(tk.Tk):
         self.eval_merged_df: Optional[pd.DataFrame] = None
         self.eval_metrics: Optional[List[TargetMetrics]] = None
         self.eval_summary: Optional[Dict[str, Any]] = None
-        self.current_plot_type = tk.StringVar(value="Histogram + KDE Density")
+        self.current_plot_type = tk.StringVar(value="distribution")
 
-        # TTK Themes & Zebra Styling
+        # Configure TTK Styles for Black & White and Times New Roman
         self._setup_ttk_styles()
 
-        # 1. Persistent Top Mission-Control Bar
-        self._build_top_bar()
-
-        # 2. Page Container Stack
-        self.container = tk.Frame(self, bg=AERO_THEME['bg_app'])
-        self.container.pack(fill='both', expand=True, padx=20, pady=(0, 16))
+        # Multi-page Stack Container
+        self.container = tk.Frame(self, bg=BW_THEME['bg_app'])
+        self.container.pack(fill='both', expand=True)
         self.container.grid_rowconfigure(0, weight=1)
         self.container.grid_columnconfigure(0, weight=1)
 
-        self.page1 = tk.Frame(self.container, bg=AERO_THEME['bg_app'])
-        self.page2 = tk.Frame(self.container, bg=AERO_THEME['bg_app'])
-        self.page3 = tk.Frame(self.container, bg=AERO_THEME['bg_app'])
+        # 3 Distinct Pages
+        self.page1 = tk.Frame(self.container, bg=BW_THEME['bg_app'])
+        self.page2 = tk.Frame(self.container, bg=BW_THEME['bg_app'])
+        self.page3 = tk.Frame(self.container, bg=BW_THEME['bg_app'])
 
         self.page1.grid(row=0, column=0, sticky='nsew')
         self.page2.grid(row=0, column=0, sticky='nsew')
         self.page3.grid(row=0, column=0, sticky='nsew')
 
-        # Build individual page views
+        # Build All Pages
         self._build_page1()
         self._build_page2()
         self._build_page3()
 
-        # Start on Ingestion Step
+        # Start on Page 1
         self.show_page(1)
 
     def _setup_ttk_styles(self) -> None:
         style = ttk.Style(self)
         style.theme_use('clam')
 
-        # Treeview Datagrid: Zebra striping, monospace tabular numbers, elevated header
+        # Treeview styling (Black & White, Times New Roman 13-14pt, taller rows)
         style.configure(
             'Treeview',
-            background=AERO_THEME['table_even'],
-            fieldbackground=AERO_THEME['table_even'],
-            foreground=AERO_THEME['fg_primary'],
-            rowheight=30,
-            font=FONT_TABLE_ROW,
-            borderwidth=0
+            background=BW_THEME['bg_surface'],
+            fieldbackground=BW_THEME['bg_surface'],
+            foreground=BW_THEME['fg_primary'],
+            rowheight=32,
+            font=FONT_TABLE_ROW
         )
         style.configure(
             'Treeview.Heading',
-            background=AERO_THEME['table_header'],
-            foreground=AERO_THEME['fg_secondary'],
+            background=BW_THEME['bg_surface_alt'],
+            foreground=BW_THEME['fg_primary'],
             relief='flat',
-            font=FONT_TABLE_HEAD,
-            padding=6
+            font=FONT_TABLE_HEAD
         )
         style.map(
             'Treeview',
-            background=[('selected', AERO_THEME['table_select'])],
-            foreground=[('selected', AERO_THEME['accent_glow'])]
+            background=[('selected', '#333333')],
+            foreground=[('selected', '#ffffff')]
         )
 
-        # Subtle Aerospace Scrollbars
-        style.configure('Vertical.TScrollbar', background=AERO_THEME['bg_surface_alt'], troughcolor=AERO_THEME['bg_app'], arrowcolor=AERO_THEME['accent'])
-        style.configure('Horizontal.TScrollbar', background=AERO_THEME['bg_surface_alt'], troughcolor=AERO_THEME['bg_app'], arrowcolor=AERO_THEME['accent'])
+        # Scrollbars
+        style.configure('Vertical.TScrollbar', background='#333333', troughcolor=BW_THEME['bg_app'])
+        style.configure('Horizontal.TScrollbar', background='#333333', troughcolor=BW_THEME['bg_app'])
 
-        # Combobox
+        # Combobox styling
         style.configure(
             'TCombobox',
-            fieldbackground=AERO_THEME['bg_input'],
-            background=AERO_THEME['bg_surface_alt'],
-            foreground=AERO_THEME['fg_primary'],
-            selectbackground=AERO_THEME['accent_dark'],
+            fieldbackground=BW_THEME['bg_input'],
+            background=BW_THEME['bg_surface_alt'],
+            foreground=BW_THEME['fg_primary'],
+            selectbackground='#333333',
             selectforeground='#ffffff',
-            arrowcolor=AERO_THEME['accent_glow'],
-            padding=5,
+            arrowcolor='#ffffff',
+            padding=6,
             font=FONT_BODY
         )
 
-    # =========================================================================
-    # PERSISTENT TOP NAVIGATION BAR (MISSION CONTROL)
-    # =========================================================================
-    def _build_top_bar(self) -> None:
-        top_frame = tk.Frame(self, bg=AERO_THEME['bg_header'], height=64)
-        top_frame.pack(fill='x', side='top', pady=(0, 16))
-
-        # Bottom subtle border on top bar
-        bot_line = tk.Frame(top_frame, bg=AERO_THEME['border'], height=1)
-        bot_line.pack(fill='x', side='bottom')
-
-        inner = tk.Frame(top_frame, bg=AERO_THEME['bg_header'])
-        inner.pack(fill='both', expand=True, padx=20, pady=10)
-
-        # Left: App Brand & Status Pill
-        left_box = tk.Frame(inner, bg=AERO_THEME['bg_header'])
-        left_box.pack(side='left', fill='y')
-
-        # Live Pulse Dot
-        beacon = tk.Label(left_box, text="●", fg=AERO_THEME['success'], bg=AERO_THEME['bg_header'], font=(FONT_UI, 12, "bold"))
-        beacon.pack(side='left', padx=(0, 6))
-
-        title_lbl = tk.Label(
-            left_box,
-            text="NEURONAV",
-            font=FONT_TITLE,
-            fg=AERO_THEME['accent_glow'],
-            bg=AERO_THEME['bg_header']
-        )
-        title_lbl.pack(side='left', padx=(0, 8))
-
-        sub_lbl = tk.Label(
-            left_box,
-            text="// SATELLITE ORBIT & CLOCK ERROR FORECASTING",
-            font=FONT_SMALL,
-            fg=AERO_THEME['fg_secondary'],
-            bg=AERO_THEME['bg_header']
-        )
-        sub_lbl.pack(side='left', padx=(0, 16))
-
-        # Status Pill
-        self.header_status_pill = tk.Label(
-            left_box,
-            text="MODEL: HARMONIC RIDGE · ORBIT: GEO · 24H HORIZON",
-            font=FONT_BADGE,
-            fg=AERO_THEME['accent_glow'],
-            bg=AERO_THEME['bg_surface_alt'],
-            padx=12,
-            pady=4,
-            highlightbackground=AERO_THEME['border'],
-            highlightthickness=1
-        )
-        self.header_status_pill.pack(side='left')
-
-        # Right: 3-Step Progress Indicator
-        right_box = tk.Frame(inner, bg=AERO_THEME['bg_header'])
-        right_box.pack(side='right', fill='y')
-
-        self.step1_btn = AeroButton(right_box, text="01 INGEST", command=lambda: self.show_page(1), variant="primary", height=32, width=105, radius=6)
-        self.step1_btn.pack(side='left', padx=3)
-
-        arrow1 = tk.Label(right_box, text="➔", fg=AERO_THEME['fg_muted'], bg=AERO_THEME['bg_header'], font=FONT_BODY)
-        arrow1.pack(side='left', padx=4)
-
-        self.step2_btn = AeroButton(right_box, text="02 PREDICT", command=lambda: self.show_page(2), variant="secondary", height=32, width=110, radius=6)
-        self.step2_btn.pack(side='left', padx=3)
-
-        arrow2 = tk.Label(right_box, text="➔", fg=AERO_THEME['fg_muted'], bg=AERO_THEME['bg_header'], font=FONT_BODY)
-        arrow2.pack(side='left', padx=4)
-
-        self.step3_btn = AeroButton(right_box, text="03 ANALYZE", command=lambda: self.show_page(3), variant="secondary", height=32, width=110, radius=6)
-        self.step3_btn.pack(side='left', padx=3)
-
     def show_page(self, page_num: int) -> None:
-        self.current_page_idx = page_num
+        """Switch view between Page 1 (Ingest/Compute), Page 2 (Predictions), Page 3 (Error Distribution)."""
         if page_num == 1:
             self.page1.tkraise()
-            self.step1_btn.variant = "primary"
-            self.step1_btn.bg_color = AERO_THEME['accent']
-            self.step1_btn.border_color = AERO_THEME['accent_glow']
-            self.step1_btn.fg_color = '#ffffff'
-            self.step1_btn._draw()
-
-            self.step2_btn.variant = "secondary"
-            self.step2_btn.bg_color = AERO_THEME['bg_surface_alt']
-            self.step2_btn.border_color = AERO_THEME['border']
-            self.step2_btn.fg_color = AERO_THEME['fg_secondary']
-            self.step2_btn._draw()
-
-            self.step3_btn.variant = "secondary"
-            self.step3_btn.bg_color = AERO_THEME['bg_surface_alt']
-            self.step3_btn.border_color = AERO_THEME['border']
-            self.step3_btn.fg_color = AERO_THEME['fg_secondary']
-            self.step3_btn._draw()
-
         elif page_num == 2:
             self.page2.tkraise()
-            self.step1_btn.variant = "secondary"
-            self.step1_btn.bg_color = AERO_THEME['success_bg']
-            self.step1_btn.border_color = AERO_THEME['success']
-            self.step1_btn.fg_color = AERO_THEME['success']
-            self.step1_btn.set_text("✔ 01 INGEST")
-
-            self.step2_btn.variant = "primary"
-            self.step2_btn.bg_color = AERO_THEME['accent']
-            self.step2_btn.border_color = AERO_THEME['accent_glow']
-            self.step2_btn.fg_color = '#ffffff'
-            self.step2_btn._draw()
-
-            self.step3_btn.variant = "secondary"
-            self.step3_btn.bg_color = AERO_THEME['bg_surface_alt']
-            self.step3_btn.border_color = AERO_THEME['border']
-            self.step3_btn.fg_color = AERO_THEME['fg_secondary']
-            self.step3_btn._draw()
-
         else:
             self.page3.tkraise()
-            self.step1_btn.variant = "secondary"
-            self.step1_btn.bg_color = AERO_THEME['success_bg']
-            self.step1_btn.border_color = AERO_THEME['success']
-            self.step1_btn.fg_color = AERO_THEME['success']
-            self.step1_btn.set_text("✔ 01 INGEST")
-
-            self.step2_btn.variant = "secondary"
-            self.step2_btn.bg_color = AERO_THEME['success_bg']
-            self.step2_btn.border_color = AERO_THEME['success']
-            self.step2_btn.fg_color = AERO_THEME['success']
-            self.step2_btn.set_text("✔ 02 PREDICT")
-
-            self.step3_btn.variant = "primary"
-            self.step3_btn.bg_color = AERO_THEME['accent']
-            self.step3_btn.border_color = AERO_THEME['accent_glow']
-            self.step3_btn.fg_color = '#ffffff'
-            self.step3_btn._draw()
 
     # =========================================================================
-    # PAGE 1: Ingestion Pipeline & Compact Model Configuration
+    # PAGE 1: File Ingestion & Compact Model Configuration
     # =========================================================================
     def _build_page1(self) -> None:
         p1 = self.page1
 
-        split = tk.Frame(p1, bg=AERO_THEME['bg_app'])
-        split.pack(fill='both', expand=True)
-        split.grid_columnconfigure(0, weight=7)
-        split.grid_columnconfigure(1, weight=4)
+        # Header Title
+        header = tk.Frame(p1, bg=BW_THEME['bg_app'])
+        header.pack(fill='x', padx=28, pady=(20, 14))
+
+        tk.Label(
+            header,
+            text="NeuroNav · Satellite Orbit & Clock Error Forecasting",
+            font=FONT_TITLE,
+            fg=BW_THEME['fg_primary'],
+            bg=BW_THEME['bg_app']
+        ).pack(anchor='w')
+
+        tk.Label(
+            header,
+            text="Page 1: Ingest Training Dataset & Configure Forecasting Model",
+            font=FONT_SUBHEADING,
+            fg=BW_THEME['fg_secondary'],
+            bg=BW_THEME['bg_app']
+        ).pack(anchor='w', pady=(2, 0))
+
+        # Main Split Frame: Left (Wider Ingestion Panel), Right (Compact Model Configuration)
+        split = tk.Frame(p1, bg=BW_THEME['bg_app'])
+        split.pack(fill='both', expand=True, padx=28, pady=(0, 20))
+        split.grid_columnconfigure(0, weight=7)  # Ingestion panel gets 70% width
+        split.grid_columnconfigure(1, weight=4)  # Compact configuration panel gets 30% width
         split.grid_rowconfigure(0, weight=1)
 
-        # ----------------- Left: Ingestion Card (Wider ~65%) -----------------
-        left_card = AeroCard(split, bg_color=AERO_THEME['bg_surface'], border_color=AERO_THEME['border'], radius=10, inner_pad=18)
-        left_card.grid(row=0, column=0, sticky='nsew', padx=(0, 10))
-        left = left_card.inner_frame
+        # ----------------- Left: Large Ingestion Panel -----------------
+        left_card = tk.Frame(split, bg=BW_THEME['bg_surface'], highlightbackground=BW_THEME['border'], highlightthickness=1)
+        left_card.grid(row=0, column=0, sticky='nsew', padx=(0, 12))
 
-        # Section Header
-        sec_h1 = tk.Frame(left, bg=AERO_THEME['bg_surface'])
-        sec_h1.pack(fill='x', pady=(0, 10))
+        # Card Title
+        top_left = tk.Frame(left_card, bg=BW_THEME['bg_surface'])
+        top_left.pack(fill='x', padx=18, pady=(16, 8))
 
         tk.Label(
-            sec_h1,
-            text="DATASET INGESTION PIPELINE",
+            top_left,
+            text="1. Select Ingestion Format",
             font=FONT_HEADING,
-            fg=AERO_THEME['fg_primary'],
-            bg=AERO_THEME['bg_surface']
-        ).pack(side='left')
+            fg=BW_THEME['fg_primary'],
+            bg=BW_THEME['bg_surface']
+        ).pack(anchor='w')
 
         tk.Label(
-            sec_h1,
-            text="IGS Precise / Broadcast / Tabular Telemetry",
-            font=FONT_SMALL,
-            fg=AERO_THEME['fg_secondary'],
-            bg=AERO_THEME['bg_surface']
-        ).pack(side='right')
+            top_left,
+            text="Accepts tabular CSV dataset or raw GNSS broadcast/precise orbit products (SP3 / RNX):",
+            font=FONT_BODY,
+            fg=BW_THEME['fg_secondary'],
+            bg=BW_THEME['bg_surface']
+        ).pack(anchor='w', pady=(2, 8))
 
-        # Pill Segmented Selector
-        seg_options = ["Tabular CSV File (*.csv)", "Precise SP3 / RNX File (*.sp3, *.rnx)"]
-        self.seg_ctrl = AeroSegmentedControl(left, options=seg_options, variable=self.input_file_type, height=36, radius=8)
-        self.seg_ctrl.pack(fill='x', pady=(0, 12))
+        # Radio Selectors for File Format
+        radio_box = tk.Frame(left_card, bg=BW_THEME['bg_surface_alt'], padx=12, pady=8, highlightbackground=BW_THEME['border'], highlightthickness=1)
+        radio_box.pack(fill='x', padx=18, pady=(0, 10))
 
-        # Unified Input Group: [ Label | Path Entry | Browse... ] + Quick Sample Pills
-        input_group = tk.Frame(left, bg=AERO_THEME['bg_surface'])
-        input_group.pack(fill='x', pady=(0, 14))
+        r_csv = tk.Radiobutton(
+            radio_box,
+            text="Tabular CSV File (*.csv)",
+            variable=self.input_file_type,
+            value="csv",
+            font=FONT_BODY_BOLD,
+            bg=BW_THEME['bg_surface_alt'],
+            fg=BW_THEME['fg_primary'],
+            selectcolor=BW_THEME['bg_input'],
+            activebackground=BW_THEME['bg_surface_alt'],
+            activeforeground='#ffffff'
+        )
+        r_csv.pack(side='left', padx=(0, 24))
 
-        # Path Entry with seamless border
-        entry_wrap = tk.Frame(input_group, bg=AERO_THEME['bg_input'], highlightbackground=AERO_THEME['border'], highlightthickness=1)
-        entry_wrap.pack(side='left', fill='x', expand=True, padx=(0, 8))
+        r_sp3 = tk.Radiobutton(
+            radio_box,
+            text="Precise SP3 / RNX File (*.sp3, *.rnx, *.nav)",
+            variable=self.input_file_type,
+            value="sp3_rnx",
+            font=FONT_BODY_BOLD,
+            bg=BW_THEME['bg_surface_alt'],
+            fg=BW_THEME['fg_primary'],
+            selectcolor=BW_THEME['bg_input'],
+            activebackground=BW_THEME['bg_surface_alt'],
+            activeforeground='#ffffff'
+        )
+        r_sp3.pack(side='left')
 
-        tk.Label(
-            entry_wrap,
-            text="📁 FILE:",
-            font=FONT_BADGE,
-            fg=AERO_THEME['accent_glow'],
-            bg=AERO_THEME['bg_input'],
-            padx=8
-        ).pack(side='left')
+        # File Selection Entry & Browse Button
+        browse_box = tk.Frame(left_card, bg=BW_THEME['bg_surface'])
+        browse_box.pack(fill='x', padx=18, pady=(0, 8))
 
         self.file_entry_var = tk.StringVar(value="")
         entry = tk.Entry(
-            entry_wrap,
+            browse_box,
             textvariable=self.file_entry_var,
             font=FONT_BODY,
-            bg=AERO_THEME['bg_input'],
-            fg=AERO_THEME['fg_primary'],
-            insertbackground=AERO_THEME['accent_glow'],
+            bg=BW_THEME['bg_input'],
+            fg=BW_THEME['fg_primary'],
+            insertbackground='#ffffff',
             relief='flat',
-            bd=0
+            highlightbackground=BW_THEME['border'],
+            highlightthickness=1
         )
-        entry.pack(side='left', fill='x', expand=True, ipady=6, padx=(0, 6))
+        entry.pack(side='left', fill='x', expand=True, ipady=6, padx=(0, 10))
 
-        browse_btn = AeroButton(
-            input_group,
+        browse_btn = tk.Button(
+            browse_box,
             text="Browse...",
-            command=self._browse_input_file,
-            variant="secondary",
-            width=100,
-            height=34,
-            radius=6
+            font=FONT_BODY_BOLD,
+            bg=BW_THEME['btn_bg'],
+            fg=BW_THEME['btn_fg'],
+            activebackground='#cccccc',
+            relief='flat',
+            cursor='hand2',
+            command=self._browse_input_file
         )
-        browse_btn.pack(side='left', padx=(0, 8))
+        browse_btn.pack(side='right', ipadx=10, ipady=4)
 
-        # Quick Load Sample Data Pills
-        geo_sample_btn = AeroButton(
-            input_group,
-            text="GEO Train",
-            command=self._load_sample_geo_train,
-            variant="secondary",
-            width=90,
-            height=34,
-            radius=6
-        )
-        geo_sample_btn.pack(side='left', padx=(0, 4))
-
-        meo_sample_btn = AeroButton(
-            input_group,
-            text="MEO-1 Train",
-            command=self._load_sample_meo1_train,
-            variant="secondary",
-            width=95,
-            height=34,
-            radius=6
-        )
-        meo_sample_btn.pack(side='left')
-
-        # Dataset Status Bar
-        ds_bar = tk.Frame(left, bg=AERO_THEME['bg_surface'])
-        ds_bar.pack(fill='x', pady=(2, 8))
+        # Quick Load Sample Buttons
+        sample_box = tk.Frame(left_card, bg=BW_THEME['bg_surface'])
+        sample_box.pack(fill='x', padx=18, pady=(0, 12))
 
         tk.Label(
-            ds_bar,
-            text="TELEMETRY DATA MATRIX (ALL RECORDS)",
+            sample_box,
+            text="Quick Load Sample Data:",
+            font=FONT_BODY_BOLD,
+            fg=BW_THEME['fg_secondary'],
+            bg=BW_THEME['bg_surface']
+        ).pack(side='left', padx=(0, 10))
+
+        btn_geo = tk.Button(
+            sample_box,
+            text="Load GEO Train",
+            font=FONT_SMALL,
+            bg=BW_THEME['btn_alt_bg'],
+            fg=BW_THEME['btn_alt_fg'],
+            relief='flat',
+            cursor='hand2',
+            command=lambda: self._load_sample_file(DEFAULT_SAMPLE_TRAIN)
+        )
+        btn_geo.pack(side='left', padx=4, ipadx=6)
+
+        btn_meo = tk.Button(
+            sample_box,
+            text="Load MEO-1 Train",
+            font=FONT_SMALL,
+            bg=BW_THEME['btn_alt_bg'],
+            fg=BW_THEME['btn_alt_fg'],
+            relief='flat',
+            cursor='hand2',
+            command=lambda: self._load_sample_file(PROJECT_ROOT / 'Data_PS-08' / 'DATA_MEO_Train.csv')
+        )
+        btn_meo.pack(side='left', padx=4, ipadx=6)
+
+        # Full Dataset Display Header (Showing Entire Dataset)
+        ds_header = tk.Frame(left_card, bg=BW_THEME['bg_surface'])
+        ds_header.pack(fill='x', padx=18, pady=(4, 6))
+
+        tk.Label(
+            ds_header,
+            text="Full Dataset View (All Records, Scrollable):",
             font=FONT_SUBHEADING,
-            fg=AERO_THEME['fg_secondary'],
-            bg=AERO_THEME['bg_surface']
+            fg=BW_THEME['fg_primary'],
+            bg=BW_THEME['bg_surface']
         ).pack(side='left')
 
         self.full_ds_badge = tk.Label(
-            ds_bar,
-            text="● AWAITING DATASET INGESTION",
-            font=FONT_BADGE,
-            fg=AERO_THEME['fg_muted'],
-            bg=AERO_THEME['bg_surface_alt'],
+            ds_header,
+            text="No file loaded",
+            font=FONT_SMALL,
+            fg=BW_THEME['fg_secondary'],
+            bg=BW_THEME['bg_surface_alt'],
             padx=10,
             pady=3,
-            highlightbackground=AERO_THEME['border'],
+            highlightbackground=BW_THEME['border'],
             highlightthickness=1
         )
         self.full_ds_badge.pack(side='right')
 
-        # Full Dataset Treeview Container with Zebra Striping
-        table_wrap = tk.Frame(left, bg=AERO_THEME['bg_surface'], highlightbackground=AERO_THEME['border'], highlightthickness=1)
-        table_wrap.pack(fill='both', expand=True)
+        # Full Dataset Treeview with BOTH Vertical & Horizontal Scrollbars
+        table_container = tk.Frame(left_card, bg=BW_THEME['bg_surface'])
+        table_container.pack(fill='both', expand=True, padx=18, pady=(0, 16))
 
         cols = ('row_idx', 'utc_time', 'x_err', 'y_err', 'z_err', 'clk_err', 'sat_id')
-        self.full_table = ttk.Treeview(table_wrap, columns=cols, show='headings', height=14)
+        self.full_table = ttk.Treeview(table_container, columns=cols, show='headings', height=14)
         self.full_table.heading('row_idx', text='#')
-        self.full_table.heading('utc_time', text='UTC TIMESTAMP')
-        self.full_table.heading('x_err', text='X ERROR (M)')
-        self.full_table.heading('y_err', text='Y ERROR (M)')
-        self.full_table.heading('z_err', text='Z ERROR (M)')
-        self.full_table.heading('clk_err', text='CLOCK ERROR (M)')
-        self.full_table.heading('sat_id', text='PRN')
+        self.full_table.heading('utc_time', text='UTC Time')
+        self.full_table.heading('x_err', text='X Error (m)')
+        self.full_table.heading('y_err', text='Y Error (m)')
+        self.full_table.heading('z_err', text='Z Error (m)')
+        self.full_table.heading('clk_err', text='Clock Error (m)')
+        self.full_table.heading('sat_id', text='Satellite ID')
 
         self.full_table.column('row_idx', width=45, anchor='center')
         self.full_table.column('utc_time', width=160, anchor='w')
@@ -713,42 +372,46 @@ class NeuroNavApp(tk.Tk):
         self.full_table.column('y_err', width=110, anchor='e')
         self.full_table.column('z_err', width=110, anchor='e')
         self.full_table.column('clk_err', width=120, anchor='e')
-        self.full_table.column('sat_id', width=80, anchor='center')
+        self.full_table.column('sat_id', width=95, anchor='center')
 
-        # Configure Zebra Striping Tags
-        self.full_table.tag_configure('even', background=AERO_THEME['table_even'], foreground=AERO_THEME['fg_primary'])
-        self.full_table.tag_configure('odd', background=AERO_THEME['table_odd'], foreground=AERO_THEME['fg_primary'])
-
-        v_scroll = ttk.Scrollbar(table_wrap, orient='vertical', command=self.full_table.yview)
-        h_scroll = ttk.Scrollbar(table_wrap, orient='horizontal', command=self.full_table.xview)
+        # Scrollbars
+        v_scroll = ttk.Scrollbar(table_container, orient='vertical', command=self.full_table.yview)
+        h_scroll = ttk.Scrollbar(table_container, orient='horizontal', command=self.full_table.xview)
         self.full_table.configure(yscrollcommand=v_scroll.set, xscrollcommand=h_scroll.set)
 
         v_scroll.pack(side='right', fill='y')
         h_scroll.pack(side='bottom', fill='x')
         self.full_table.pack(side='left', fill='both', expand=True)
 
-        # ----------------- Right: Model Config Panel (Compact ~35%) -----------------
-        right_card = AeroCard(split, bg_color=AERO_THEME['bg_surface'], border_color=AERO_THEME['border'], radius=10, inner_pad=18)
-        right_card.grid(row=0, column=1, sticky='nsew', padx=(10, 0))
-        right = right_card.inner_frame
+        # ----------------- Right: Compact Model Configuration Panel -----------------
+        right_card = tk.Frame(split, bg=BW_THEME['bg_surface'], highlightbackground=BW_THEME['border'], highlightthickness=1)
+        right_card.grid(row=0, column=1, sticky='nsew', padx=(12, 0))
 
-        # Section Header
-        sec_h2 = tk.Frame(right, bg=AERO_THEME['bg_surface'])
-        sec_h2.pack(fill='x', pady=(0, 10))
+        # Header
+        top_right = tk.Frame(right_card, bg=BW_THEME['bg_surface'])
+        top_right.pack(fill='x', padx=18, pady=(16, 8))
 
         tk.Label(
-            sec_h2,
-            text="MODEL INFERENCE CONFIGURATION",
+            top_right,
+            text="2. Model Configuration",
             font=FONT_HEADING,
-            fg=AERO_THEME['fg_primary'],
-            bg=AERO_THEME['bg_surface']
+            fg=BW_THEME['fg_primary'],
+            bg=BW_THEME['bg_surface']
         ).pack(anchor='w')
 
-        # Model Selector
-        m_box = tk.Frame(right, bg=AERO_THEME['bg_surface'])
-        m_box.pack(fill='x', pady=(0, 10))
+        tk.Label(
+            top_right,
+            text="Machine learning pipeline settings:",
+            font=FONT_BODY,
+            fg=BW_THEME['fg_secondary'],
+            bg=BW_THEME['bg_surface']
+        ).pack(anchor='w', pady=(2, 10))
 
-        tk.Label(m_box, text="FORECASTING MODEL:", font=FONT_BADGE, fg=AERO_THEME['fg_secondary'], bg=AERO_THEME['bg_surface']).pack(anchor='w', pady=(0, 3))
+        # Model Selector
+        m_box = tk.Frame(right_card, bg=BW_THEME['bg_surface'])
+        m_box.pack(fill='x', padx=18, pady=(0, 10))
+
+        tk.Label(m_box, text="Forecasting Model:", font=FONT_BODY_BOLD, fg=BW_THEME['fg_primary'], bg=BW_THEME['bg_surface']).pack(anchor='w', pady=(0, 3))
         model_choices = [
             "Harmonic Ridge (PS-08 Winner)",
             "BiLSTM-GRU (Deep Neural Net)",
@@ -757,143 +420,158 @@ class NeuroNavApp(tk.Tk):
             "Gaussian Process Regressor"
         ]
         self.model_combo = ttk.Combobox(m_box, textvariable=self.selected_model, values=model_choices, state='readonly', font=FONT_BODY)
-        self.model_combo.pack(fill='x', ipady=3)
-        self.model_combo.bind("<<ComboboxSelected>>", self._update_header_pill)
+        self.model_combo.pack(fill='x', ipady=4)
 
         # Orbit Profile Selector
-        o_box = tk.Frame(right, bg=AERO_THEME['bg_surface'])
-        o_box.pack(fill='x', pady=(0, 10))
+        o_box = tk.Frame(right_card, bg=BW_THEME['bg_surface'])
+        o_box.pack(fill='x', padx=18, pady=(0, 10))
 
-        tk.Label(o_box, text="ORBIT PROFILE:", font=FONT_BADGE, fg=AERO_THEME['fg_secondary'], bg=AERO_THEME['bg_surface']).pack(anchor='w', pady=(0, 3))
+        tk.Label(o_box, text="Orbit Profile:", font=FONT_BODY_BOLD, fg=BW_THEME['fg_primary'], bg=BW_THEME['bg_surface']).pack(anchor='w', pady=(0, 3))
         self.orbit_combo = ttk.Combobox(o_box, textvariable=self.detected_orbit, values=["Auto-Detect (GEO)", "GEO", "MEO-1", "MEO-2"], state='readonly', font=FONT_BODY)
-        self.orbit_combo.pack(fill='x', ipady=3)
-        self.orbit_combo.bind("<<ComboboxSelected>>", self._update_header_pill)
+        self.orbit_combo.pack(fill='x', ipady=4)
 
         # Horizon Selector
-        h_box = tk.Frame(right, bg=AERO_THEME['bg_surface'])
-        h_box.pack(fill='x', pady=(0, 12))
+        h_box = tk.Frame(right_card, bg=BW_THEME['bg_surface'])
+        h_box.pack(fill='x', padx=18, pady=(0, 10))
 
-        tk.Label(h_box, text="FORECAST HORIZON:", font=FONT_BADGE, fg=AERO_THEME['fg_secondary'], bg=AERO_THEME['bg_surface']).pack(anchor='w', pady=(0, 3))
+        tk.Label(h_box, text="Forecast Horizon:", font=FONT_BODY_BOLD, fg=BW_THEME['fg_primary'], bg=BW_THEME['bg_surface']).pack(anchor='w', pady=(0, 3))
         self.horizon_combo = ttk.Combobox(h_box, textvariable=self.forecast_horizon_str, values=["24 Hours (15-min cadence)", "12 Hours (15-min cadence)", "48 Hours (15-min cadence)"], state='readonly', font=FONT_BODY)
-        self.horizon_combo.pack(fill='x', ipady=3)
+        self.horizon_combo.pack(fill='x', ipady=4)
 
-        # Nested Telemetry Specification Card
-        spec_card = AeroCard(right, bg_color=AERO_THEME['bg_input'], border_color=AERO_THEME['border'], radius=8, inner_pad=12)
-        spec_card.pack(fill='x', pady=(0, 16))
-        spec = spec_card.inner_frame
+        # Model Architecture & Hyperparameter Summary Box (Keeps panel well-filled & informative)
+        info_box = tk.Frame(right_card, bg=BW_THEME['bg_surface_alt'], highlightbackground=BW_THEME['border'], highlightthickness=1)
+        info_box.pack(fill='x', padx=18, pady=(0, 14))
 
         tk.Label(
-            spec,
-            text="MISSION PROTOCOL SPECIFICATIONS",
-            font=FONT_BADGE,
-            fg=AERO_THEME['accent_glow'],
-            bg=AERO_THEME['bg_input']
-        ).pack(anchor='w', pady=(0, 6))
+            info_box,
+            text="Model Architecture & Protocol",
+            font=FONT_BODY_BOLD,
+            fg=BW_THEME['fg_primary'],
+            bg=BW_THEME['bg_surface_alt']
+        ).pack(anchor='w', padx=12, pady=(10, 4))
 
-        spec_text = (
-            "• Targets: X, Y, Z coordinates & SatClock bias\n"
+        info_text = (
+            "• Targets: X error, Y error, Z error, Clock bias\n"
             "• Training: 7-day multi-satellite ephemeris\n"
-            "• Objective: Maximizing Shapiro-Wilk W Score\n"
-            "• Benchmark Ref: W = 0.9810, p = 0.5840\n"
-            "• Loss Policy: Uncertainty-weighted Gaussian NLL"
+            "• Evaluation Criterion: Priority-1 Shapiro-Wilk W\n"
+            "• Reference Normality Score: W = 0.9810, p = 0.5840\n"
+            "• Tie-Breakers: Mean bias, Std Dev, Q-Q plots"
         )
         tk.Label(
-            spec,
-            text=spec_text,
+            info_box,
+            text=info_text,
             font=FONT_SMALL,
             justify='left',
-            fg=AERO_THEME['fg_secondary'],
-            bg=AERO_THEME['bg_input']
-        ).pack(anchor='w')
+            fg=BW_THEME['fg_secondary'],
+            bg=BW_THEME['bg_surface_alt']
+        ).pack(anchor='w', padx=12, pady=(0, 10))
 
-        # Primary Compute Action Button
-        self.compute_btn = AeroButton(
-            right,
+        # Action Button Box
+        action_box = tk.Frame(right_card, bg=BW_THEME['bg_surface'])
+        action_box.pack(fill='x', padx=18, pady=(0, 16))
+
+        self.compute_btn = tk.Button(
+            action_box,
             text="Compute ML Forecast Predictions ➔",
-            command=self._start_computation,
-            variant="primary",
-            height=44,
-            radius=8
+            font=FONT_BODY_BOLD,
+            bg=BW_THEME['btn_bg'],
+            fg=BW_THEME['btn_fg'],
+            activebackground='#dddddd',
+            relief='flat',
+            cursor='hand2',
+            command=self._start_computation
         )
-        self.compute_btn.pack(fill='x', pady=(0, 8))
+        self.compute_btn.pack(fill='x', ipady=10)
 
-        # Status Readout
         self.status_lbl = tk.Label(
-            right,
-            text="● ENGINE IDLE: Select dataset and launch forecast",
+            action_box,
+            text="Ready. Load a dataset to compute.",
             font=FONT_SMALL,
-            fg=AERO_THEME['fg_secondary'],
-            bg=AERO_THEME['bg_surface']
+            fg=BW_THEME['fg_secondary'],
+            bg=BW_THEME['bg_surface']
         )
-        self.status_lbl.pack(anchor='center')
+        self.status_lbl.pack(anchor='center', pady=(8, 0))
 
     # =========================================================================
-    # PAGE 2: Predictions Output & 8th Day Ground Truth Upload
+    # PAGE 2: Output of the ML Model & 8th-Day Ground Truth Upload
     # =========================================================================
     def _build_page2(self) -> None:
         p2 = self.page2
 
-        # Model Run Banner Card
-        banner_card = AeroCard(p2, bg_color=AERO_THEME['bg_surface'], border_color=AERO_THEME['border'], radius=10, inner_pad=12)
-        banner_card.pack(fill='x', pady=(0, 14))
-        banner = banner_card.inner_frame
+        # Header Navigation Bar
+        nav_bar = tk.Frame(p2, bg=BW_THEME['bg_app'])
+        nav_bar.pack(fill='x', padx=28, pady=(18, 10))
 
-        left_b = tk.Frame(banner, bg=AERO_THEME['bg_surface'])
-        left_b.pack(side='left', fill='y')
+        back_btn = tk.Button(
+            nav_bar,
+            text="⬅ Back to Ingestion (Page 1)",
+            font=FONT_BODY_BOLD,
+            bg=BW_THEME['btn_alt_bg'],
+            fg=BW_THEME['btn_alt_fg'],
+            relief='flat',
+            cursor='hand2',
+            command=lambda: self.show_page(1)
+        )
+        back_btn.pack(side='left', ipadx=10, ipady=4, padx=(0, 16))
 
         tk.Label(
-            left_b,
-            text="● FORECAST RESULTS //",
-            font=FONT_HEADING,
-            fg=AERO_THEME['accent_glow'],
-            bg=AERO_THEME['bg_surface']
-        ).pack(side='left', padx=(0, 8))
+            nav_bar,
+            text="Page 2: ML Model Output Predictions & 8th Day Input",
+            font=FONT_TITLE,
+            fg=BW_THEME['fg_primary'],
+            bg=BW_THEME['bg_app']
+        ).pack(side='left')
 
-        self.p2_banner = tk.Label(
-            left_b,
-            text="MODEL: HARMONIC RIDGE · ORBIT: GEO · 96 EPOCHS (24.0 HRS)",
-            font=FONT_BODY,
-            fg=AERO_THEME['fg_primary'],
-            bg=AERO_THEME['bg_surface']
-        )
-        self.p2_banner.pack(side='left')
-
-        export_btn = AeroButton(
-            banner,
+        export_btn = tk.Button(
+            nav_bar,
             text="Export Predictions (CSV) 💾",
-            command=self._export_predictions_csv,
-            variant="secondary",
-            width=190,
-            height=32,
-            radius=6
+            font=FONT_BODY_BOLD,
+            bg=BW_THEME['btn_bg'],
+            fg=BW_THEME['btn_fg'],
+            relief='flat',
+            cursor='hand2',
+            command=self._export_predictions_csv
         )
-        export_btn.pack(side='right')
+        export_btn.pack(side='right', ipadx=10, ipady=4)
 
-        # Predictions Data Table Card
-        pred_card = AeroCard(p2, bg_color=AERO_THEME['bg_surface'], border_color=AERO_THEME['border'], radius=10, inner_pad=16)
-        pred_card.pack(fill='both', expand=True, pady=(0, 14))
-        pred = pred_card.inner_frame
+        # Top Model Banner
+        self.p2_banner = tk.Label(
+            p2,
+            text="Model: Not computed yet",
+            font=FONT_BODY,
+            bg=BW_THEME['bg_surface_alt'],
+            fg=BW_THEME['fg_primary'],
+            padx=16,
+            pady=8,
+            highlightbackground=BW_THEME['border'],
+            highlightthickness=1
+        )
+        self.p2_banner.pack(fill='x', padx=28, pady=(0, 14))
+
+        # Main Table Card: Full Predictions Output
+        pred_card = tk.Frame(p2, bg=BW_THEME['bg_surface'], highlightbackground=BW_THEME['border'], highlightthickness=1)
+        pred_card.pack(fill='both', expand=True, padx=28, pady=(0, 14))
 
         tk.Label(
-            pred,
-            text="PREDICTED SATELLITE RESIDUAL SERIES",
+            pred_card,
+            text="ML Model Predicted Output Values (Series of Predictions):",
             font=FONT_HEADING,
-            fg=AERO_THEME['fg_primary'],
-            bg=AERO_THEME['bg_surface']
-        ).pack(anchor='w', pady=(0, 10))
+            fg=BW_THEME['fg_primary'],
+            bg=BW_THEME['bg_surface']
+        ).pack(anchor='w', padx=18, pady=(14, 8))
 
-        # Predictions Table Container
-        pred_table_wrap = tk.Frame(pred, bg=AERO_THEME['bg_surface'], highlightbackground=AERO_THEME['border'], highlightthickness=1)
-        pred_table_wrap.pack(fill='both', expand=True)
+        # Scrollable Predictions Table
+        pred_frame = tk.Frame(pred_card, bg=BW_THEME['bg_surface'])
+        pred_frame.pack(fill='both', expand=True, padx=18, pady=(0, 14))
 
         p_cols = ('row_idx', 'utc_time', 'pred_x', 'pred_y', 'pred_z', 'pred_clk')
-        self.pred_table = ttk.Treeview(pred_table_wrap, columns=p_cols, show='headings', height=12)
+        self.pred_table = ttk.Treeview(pred_frame, columns=p_cols, show='headings', height=12)
         self.pred_table.heading('row_idx', text='#')
-        self.pred_table.heading('utc_time', text='UTC FORECAST EPOCH')
-        self.pred_table.heading('pred_x', text='PREDICTED X ERROR (M)')
-        self.pred_table.heading('pred_y', text='PREDICTED Y ERROR (M)')
-        self.pred_table.heading('pred_z', text='PREDICTED Z ERROR (M)')
-        self.pred_table.heading('pred_clk', text='PREDICTED CLOCK BIAS (M)')
+        self.pred_table.heading('utc_time', text='UTC Forecast Epoch')
+        self.pred_table.heading('pred_x', text='Predicted X Error (m)')
+        self.pred_table.heading('pred_y', text='Predicted Y Error (m)')
+        self.pred_table.heading('pred_z', text='Predicted Z Error (m)')
+        self.pred_table.heading('pred_clk', text='Predicted Clock Bias (m)')
 
         self.pred_table.column('row_idx', width=45, anchor='center')
         self.pred_table.column('utc_time', width=190, anchor='w')
@@ -902,189 +580,239 @@ class NeuroNavApp(tk.Tk):
         self.pred_table.column('pred_z', width=160, anchor='e')
         self.pred_table.column('pred_clk', width=180, anchor='e')
 
-        self.pred_table.tag_configure('even', background=AERO_THEME['table_even'], foreground=AERO_THEME['fg_primary'])
-        self.pred_table.tag_configure('odd', background=AERO_THEME['table_odd'], foreground=AERO_THEME['fg_primary'])
-
-        pv_scroll = ttk.Scrollbar(pred_table_wrap, orient='vertical', command=self.pred_table.yview)
-        ph_scroll = ttk.Scrollbar(pred_table_wrap, orient='horizontal', command=self.pred_table.xview)
+        pv_scroll = ttk.Scrollbar(pred_frame, orient='vertical', command=self.pred_table.yview)
+        ph_scroll = ttk.Scrollbar(pred_frame, orient='horizontal', command=self.pred_table.xview)
         self.pred_table.configure(yscrollcommand=pv_scroll.set, xscrollcommand=ph_scroll.set)
 
         pv_scroll.pack(side='right', fill='y')
         ph_scroll.pack(side='bottom', fill='x')
         self.pred_table.pack(side='left', fill='both', expand=True)
 
-        # Bottom Card: Ground Truth Upload & Compare Action
-        gt_card = AeroCard(p2, bg_color=AERO_THEME['bg_surface'], border_color=AERO_THEME['border'], radius=10, inner_pad=14)
-        gt_card.pack(fill='x')
-        gt = gt_card.inner_frame
+        # Bottom Card: 8th-Day Ground Truth Input & Compare Action
+        comp_card = tk.Frame(p2, bg=BW_THEME['bg_surface'], highlightbackground=BW_THEME['border'], highlightthickness=1)
+        comp_card.pack(fill='x', padx=28, pady=(0, 18))
 
-        top_gt = tk.Frame(gt, bg=AERO_THEME['bg_surface'])
-        top_gt.pack(fill='x', pady=(0, 10))
+        top_comp = tk.Frame(comp_card, bg=BW_THEME['bg_surface'])
+        top_comp.pack(fill='x', padx=18, pady=(12, 6))
 
         tk.Label(
-            top_gt,
-            text="DAY-8 GROUND TRUTH TELEMETRY & STATISTICAL COMPARISON",
+            top_comp,
+            text="Day-8 Ground Truth Data & Comparison:",
             font=FONT_HEADING,
-            fg=AERO_THEME['fg_primary'],
-            bg=AERO_THEME['bg_surface']
+            fg=BW_THEME['fg_primary'],
+            bg=BW_THEME['bg_surface']
         ).pack(side='left')
 
         self.gt_badge = tk.Label(
-            top_gt,
-            text="● NO GROUND TRUTH LOADED",
-            font=FONT_BADGE,
-            fg=AERO_THEME['fg_muted'],
-            bg=AERO_THEME['bg_surface_alt'],
+            top_comp,
+            text="No 8th-day file loaded",
+            font=FONT_SMALL,
+            fg=BW_THEME['fg_secondary'],
+            bg=BW_THEME['bg_surface_alt'],
             padx=10,
             pady=3,
-            highlightbackground=AERO_THEME['border'],
+            highlightbackground=BW_THEME['border'],
             highlightthickness=1
         )
         self.gt_badge.pack(side='right')
 
-        # Action Bar
-        act_bar = tk.Frame(gt, bg=AERO_THEME['bg_surface'])
-        act_bar.pack(fill='x')
+        # Upload Bar
+        upload_box = tk.Frame(comp_card, bg=BW_THEME['bg_surface'])
+        upload_box.pack(fill='x', padx=18, pady=(0, 14))
 
-        upload_btn = AeroButton(
-            act_bar,
+        upload_btn = tk.Button(
+            upload_box,
             text="Upload 8th Day Data (CSV/SP3/RNX) 📁",
-            command=self._browse_8th_day_file,
-            variant="secondary",
-            width=280,
-            height=40,
-            radius=8
+            font=FONT_BODY_BOLD,
+            bg=BW_THEME['btn_alt_bg'],
+            fg=BW_THEME['btn_alt_fg'],
+            relief='flat',
+            cursor='hand2',
+            command=self._browse_8th_day_file
         )
-        upload_btn.pack(side='left', padx=(0, 8))
+        upload_btn.pack(side='left', padx=(0, 10), ipady=6, ipadx=10)
 
-        sample_test_btn = AeroButton(
-            act_bar,
+        sample_gt_btn = tk.Button(
+            upload_box,
             text="Load Sample Day-8 Test",
-            command=self._load_sample_geo_test,
-            variant="secondary",
-            width=180,
-            height=40,
-            radius=8
+            font=FONT_BODY,
+            bg=BW_THEME['btn_alt_bg'],
+            fg=BW_THEME['btn_alt_fg'],
+            relief='flat',
+            cursor='hand2',
+            command=lambda: self._load_8th_day_file(DEFAULT_SAMPLE_TEST)
         )
-        sample_test_btn.pack(side='left', padx=(0, 12))
+        sample_gt_btn.pack(side='left', padx=(0, 16), ipady=6, ipadx=8)
 
-        self.compare_btn = AeroButton(
-            act_bar,
+        # Compare Button to advance to Page 3
+        self.compare_btn = tk.Button(
+            upload_box,
             text="Compare & View Error Distribution ➔",
-            command=self._run_comparison_and_goto_page3,
-            variant="primary",
-            width=300,
-            height=40,
-            radius=8
+            font=FONT_BODY_BOLD,
+            bg=BW_THEME['btn_bg'],
+            fg=BW_THEME['btn_fg'],
+            activebackground='#dddddd',
+            relief='flat',
+            cursor='hand2',
+            state='disabled',
+            command=self._run_comparison_and_goto_page3
         )
-        self.compare_btn.pack(side='right')
-        self.compare_btn.config_state('disabled')
+        self.compare_btn.pack(side='right', ipady=8, ipadx=16)
 
     # =========================================================================
-    # PAGE 3: Statistical Results Table & Error Distribution Visuals
+    # PAGE 3: Error Distribution Graphs & Shapiro-Wilk Statistical Results
     # =========================================================================
     def _build_page3(self) -> None:
         p3 = self.page3
 
-        # Top Card: Shapiro-Wilk Results Table
-        stat_card = AeroCard(p3, bg_color=AERO_THEME['bg_surface'], border_color=AERO_THEME['border'], radius=10, inner_pad=16)
-        stat_card.pack(fill='x', pady=(0, 14))
-        stat = stat_card.inner_frame
+        # Header Navigation Bar
+        nav_bar = tk.Frame(p3, bg=BW_THEME['bg_app'])
+        nav_bar.pack(fill='x', padx=28, pady=(18, 10))
+
+        back_p2_btn = tk.Button(
+            nav_bar,
+            text="⬅ Back to Predictions (Page 2)",
+            font=FONT_BODY_BOLD,
+            bg=BW_THEME['btn_alt_bg'],
+            fg=BW_THEME['btn_alt_fg'],
+            relief='flat',
+            cursor='hand2',
+            command=lambda: self.show_page(2)
+        )
+        back_p2_btn.pack(side='left', ipadx=10, ipady=4, padx=(0, 12))
+
+        back_p1_btn = tk.Button(
+            nav_bar,
+            text="Ingestion (Page 1)",
+            font=FONT_BODY,
+            bg=BW_THEME['btn_alt_bg'],
+            fg=BW_THEME['btn_alt_fg'],
+            relief='flat',
+            cursor='hand2',
+            command=lambda: self.show_page(1)
+        )
+        back_p1_btn.pack(side='left', ipadx=8, ipady=4, padx=(0, 16))
 
         tk.Label(
-            stat,
-            text="SHAPIRO-WILK NORMALITY & HYPOTHESIS TEST RESULTS (α = 0.05)",
-            font=FONT_HEADING,
-            fg=AERO_THEME['fg_primary'],
-            bg=AERO_THEME['bg_surface']
-        ).pack(anchor='w', pady=(0, 10))
+            nav_bar,
+            text="Page 3: Error Distribution & Shapiro-Wilk Hypothesis Tests",
+            font=FONT_TITLE,
+            fg=BW_THEME['fg_primary'],
+            bg=BW_THEME['bg_app']
+        ).pack(side='left')
 
-        sh_table_wrap = tk.Frame(stat, bg=AERO_THEME['bg_surface'], highlightbackground=AERO_THEME['border'], highlightthickness=1)
-        sh_table_wrap.pack(fill='x')
+        # Top Card: Shapiro-Wilk Normality & Hypothesis Test Table
+        stat_card = tk.Frame(p3, bg=BW_THEME['bg_surface'], highlightbackground=BW_THEME['border'], highlightthickness=1)
+        stat_card.pack(fill='x', padx=28, pady=(0, 12))
+
+        tk.Label(
+            stat_card,
+            text="Shapiro-Wilk W Statistic, p-values & Hypothesis Test Results (α = 0.05):",
+            font=FONT_HEADING,
+            fg=BW_THEME['fg_primary'],
+            bg=BW_THEME['bg_surface']
+        ).pack(anchor='w', padx=18, pady=(12, 6))
+
+        sh_frame = tk.Frame(stat_card, bg=BW_THEME['bg_surface'])
+        sh_frame.pack(fill='x', padx=18, pady=(0, 14))
 
         sh_cols = ('target', 'w_stat', 'p_val', 'alpha', 'hypothesis', 'bias', 'std', 'mae', 'rmse')
-        self.shapiro_table = ttk.Treeview(sh_table_wrap, columns=sh_cols, show='headings', height=5)
-        self.shapiro_table.heading('target', text='TARGET COMPONENT')
-        self.shapiro_table.heading('w_stat', text='SHAPIRO-WILK W')
-        self.shapiro_table.heading('p_val', text='P-VALUE')
-        self.shapiro_table.heading('alpha', text='α LEVEL')
-        self.shapiro_table.heading('hypothesis', text='HYPOTHESIS DECISION (H0: NORMAL)')
-        self.shapiro_table.heading('bias', text='|BIAS| (M)')
-        self.shapiro_table.heading('std', text='STD DEV (M)')
-        self.shapiro_table.heading('mae', text='MAE (M)')
-        self.shapiro_table.heading('rmse', text='RMSE (M)')
+        self.shapiro_table = ttk.Treeview(sh_frame, columns=sh_cols, show='headings', height=5)
+        self.shapiro_table.heading('target', text='Target Component')
+        self.shapiro_table.heading('w_stat', text='Shapiro-Wilk W')
+        self.shapiro_table.heading('p_val', text='p-value')
+        self.shapiro_table.heading('alpha', text='α Level')
+        self.shapiro_table.heading('hypothesis', text='Hypothesis Test Result (H0: Normal)')
+        self.shapiro_table.heading('bias', text='|Bias| (m)')
+        self.shapiro_table.heading('std', text='Std Dev (m)')
+        self.shapiro_table.heading('mae', text='MAE (m)')
+        self.shapiro_table.heading('rmse', text='RMSE (m)')
 
         self.shapiro_table.column('target', width=130, anchor='w')
-        self.shapiro_table.column('w_stat', width=115, anchor='center')
-        self.shapiro_table.column('p_val', width=110, anchor='center')
-        self.shapiro_table.column('alpha', width=80, anchor='center')
-        self.shapiro_table.column('hypothesis', width=220, anchor='center')
-        self.shapiro_table.column('bias', width=85, anchor='e')
-        self.shapiro_table.column('std', width=90, anchor='e')
-        self.shapiro_table.column('mae', width=85, anchor='e')
-        self.shapiro_table.column('rmse', width=85, anchor='e')
+        self.shapiro_table.column('w_stat', width=105, anchor='center')
+        self.shapiro_table.column('p_val', width=105, anchor='center')
+        self.shapiro_table.column('alpha', width=75, anchor='center')
+        self.shapiro_table.column('hypothesis', width=200, anchor='center')
+        self.shapiro_table.column('bias', width=80, anchor='e')
+        self.shapiro_table.column('std', width=80, anchor='e')
+        self.shapiro_table.column('mae', width=80, anchor='e')
+        self.shapiro_table.column('rmse', width=80, anchor='e')
 
-        # Semantic Pass / Fail Badges
-        self.shapiro_table.tag_configure('pass', foreground=AERO_THEME['success'], background=AERO_THEME['table_even'])
-        self.shapiro_table.tag_configure('reject', foreground=AERO_THEME['error'], background=AERO_THEME['table_odd'])
-        self.shapiro_table.tag_configure('summary', background=AERO_THEME['table_header'], foreground=AERO_THEME['accent_glow'], font=FONT_TABLE_ROW_BOLD)
+        self.shapiro_table.tag_configure('pass', foreground='#ffffff')
+        self.shapiro_table.tag_configure('reject', foreground='#aaaaaa')
+        self.shapiro_table.tag_configure('summary', background=BW_THEME['bg_surface_alt'], font=FONT_TABLE_HEAD)
 
         self.shapiro_table.pack(fill='x')
 
-        # Bottom Card: Residual Distribution & Q-Q Plots
-        plot_card = AeroCard(p3, bg_color=AERO_THEME['bg_surface'], border_color=AERO_THEME['border'], radius=10, inner_pad=14)
-        plot_card.pack(fill='both', expand=True)
-        pl = plot_card.inner_frame
+        # Bottom Card: Embedded Matplotlib Error Distribution Plots
+        plot_card = tk.Frame(p3, bg=BW_THEME['bg_surface'], highlightbackground=BW_THEME['border'], highlightthickness=1)
+        plot_card.pack(fill='both', expand=True, padx=28, pady=(0, 16))
 
-        p_hdr = tk.Frame(pl, bg=AERO_THEME['bg_surface'])
-        p_hdr.pack(fill='x', pady=(0, 8))
+        plot_ctrl = tk.Frame(plot_card, bg=BW_THEME['bg_surface'])
+        plot_ctrl.pack(fill='x', padx=18, pady=(10, 4))
 
         tk.Label(
-            p_hdr,
-            text="RESIDUAL ERROR PROBABILITY VISUALS (X, Y, Z, CLOCK)",
+            plot_ctrl,
+            text="Residual Error Distribution Visuals:",
             font=FONT_HEADING,
-            fg=AERO_THEME['fg_primary'],
-            bg=AERO_THEME['bg_surface']
+            fg=BW_THEME['fg_primary'],
+            bg=BW_THEME['bg_surface']
         ).pack(side='left')
 
-        # Segmented Control for Plot View
-        plot_modes = ["Histogram + KDE Density", "Normal Q-Q Plots (Priority 3)"]
-        self.plot_seg = AeroSegmentedControl(p_hdr, options=plot_modes, variable=self.current_plot_type, on_change=self._render_plot, height=32, radius=6)
-        self.plot_seg.pack(side='right')
+        # Plot Type Switcher
+        r_qq = tk.Radiobutton(
+            plot_ctrl,
+            text="Normal Q-Q Plot (Judge Priority 3)",
+            variable=self.current_plot_type,
+            value="qq",
+            font=FONT_BODY,
+            bg=BW_THEME['bg_surface'],
+            fg=BW_THEME['fg_primary'],
+            selectcolor=BW_THEME['bg_input'],
+            command=self._render_plot
+        )
+        r_qq.pack(side='right', padx=(10, 0))
 
-        # Embedded Matplotlib Canvas Frame
-        plot_wrap = tk.Frame(pl, bg=AERO_THEME['bg_surface'], highlightbackground=AERO_THEME['border'], highlightthickness=1)
-        plot_wrap.pack(fill='both', expand=True)
+        r_dist = tk.Radiobutton(
+            plot_ctrl,
+            text="Error Distribution (Histogram + KDE)",
+            variable=self.current_plot_type,
+            value="distribution",
+            font=FONT_BODY,
+            bg=BW_THEME['bg_surface'],
+            fg=BW_THEME['fg_primary'],
+            selectcolor=BW_THEME['bg_input'],
+            command=self._render_plot
+        )
+        r_dist.pack(side='right', padx=(10, 10))
 
-        plt.rcParams['font.family'] = 'sans-serif'
-        plt.rcParams['font.sans-serif'] = ['Segoe UI', 'DejaVu Sans', 'Arial']
+        # Matplotlib Canvas Frame
+        self.plot_container = tk.Frame(plot_card, bg=BW_THEME['bg_input'])
+        self.plot_container.pack(fill='both', expand=True, padx=18, pady=(0, 12))
 
-        self.fig, self.axes = plt.subplots(2, 2, figsize=(8, 4), facecolor=AERO_THEME['bg_surface'])
-        self.fig.tight_layout(pad=2.4)
-        self.canvas = FigureCanvasTkAgg(self.fig, master=plot_wrap)
+        # Configure Matplotlib rcParams for Times New Roman & Black/White
+        plt.rcParams['font.family'] = 'serif'
+        plt.rcParams['font.serif'] = ['Times New Roman', 'DejaVu Serif']
+
+        self.fig, self.axes = plt.subplots(2, 2, figsize=(7.5, 3.8), facecolor=BW_THEME['bg_input'])
+        self.fig.tight_layout(pad=2.2)
+        self.canvas = FigureCanvasTkAgg(self.fig, master=self.plot_container)
         self.canvas.get_tk_widget().pack(fill='both', expand=True)
 
         for ax in self.axes.flat:
-            ax.set_facecolor(AERO_THEME['bg_app'])
-            ax.tick_params(colors=AERO_THEME['fg_secondary'], labelsize=9)
-            for s in ax.spines.values():
-                s.set_color(AERO_THEME['border'])
-                s.set_linewidth(1.0)
-            ax.text(0.5, 0.5, "Awaiting Day-8 Comparison", color=AERO_THEME['fg_muted'], ha='center', va='center', transform=ax.transAxes, fontsize=11)
+            ax.set_facecolor(BW_THEME['bg_surface'])
+            ax.tick_params(colors=BW_THEME['fg_secondary'], labelsize=9)
+            for spine in ax.spines.values():
+                spine.set_color(BW_THEME['border'])
+            ax.text(0.5, 0.5, "Awaiting Comparison", color=BW_THEME['fg_secondary'], ha='center', va='center', transform=ax.transAxes, fontsize=11, fontfamily=FONT_FAMILY)
         self.canvas.draw()
 
     # =========================================================================
-    # LOGIC & EVENT HANDLERS
+    # Event Handlers & Core Business Logic
     # =========================================================================
-    def _update_header_pill(self, event=None) -> None:
-        m = self.selected_model.get().split('(')[0].strip()
-        o = self.detected_orbit.get()
-        h = self.forecast_horizon_str.get().split('(')[0].strip()
-        self.header_status_pill.config(text=f"MODEL: {m.upper()} · {o.upper()} · {h.upper()}")
-
     def _browse_input_file(self) -> None:
         ft = self.input_file_type.get()
-        if "CSV" in ft:
+        if ft == 'csv':
             filetypes = [("CSV Files", "*.csv"), ("Text Files", "*.txt"), ("All Files", "*.*")]
         else:
             filetypes = [
@@ -1098,23 +826,16 @@ class NeuroNavApp(tk.Tk):
         if chosen:
             self._load_file_data(Path(chosen))
 
-    def _load_sample_geo_train(self) -> None:
-        p = PROJECT_ROOT / 'Data_PS-08' / 'DATA_GEO_Train.csv'
-        if p.exists():
-            self._load_file_data(p)
-        else:
-            messagebox.showwarning("File Missing", f"Could not find sample at {p}")
-
-    def _load_sample_meo1_train(self) -> None:
-        p = PROJECT_ROOT / 'Data_PS-08' / 'DATA_MEO-1_Train.csv'
-        if p.exists():
-            self._load_file_data(p)
-        else:
-            messagebox.showwarning("File Missing", f"Could not find sample at {p}")
+    def _load_sample_file(self, path: Path) -> None:
+        if not path.exists():
+            messagebox.showwarning("File Missing", f"Could not find sample at: {path}")
+            return
+        self.input_file_type.set("csv")
+        self._load_file_data(path)
 
     def _load_file_data(self, path: Path) -> None:
         try:
-            self.status_lbl.config(text=f"● INGESTING {path.name}...", fg=AERO_THEME['accent_glow'])
+            self.status_lbl.config(text=f"Loading {path.name}...", fg=BW_THEME['fg_primary'])
             self.update_idletasks()
 
             df = load_dataset_file(path)
@@ -1124,9 +845,11 @@ class NeuroNavApp(tk.Tk):
 
             detected = detect_series_type(df, path)
             self.detected_orbit.set(f"Auto-Detect ({detected})")
-            self._update_header_pill()
 
+            # Load the WHOLE dataset into the scrollable Treeview (as requested!)
             self.full_table.delete(*self.full_table.get_children())
+            
+            # Efficient bulk insertion of all rows
             for idx, row in df.iterrows():
                 t_str = row['utc_time'].strftime('%Y-%m-%d %H:%M') if pd.notnull(row['utc_time']) else ""
                 x_str = f"{row['x_error_m']:.4f}" if 'x_error_m' in row and pd.notnull(row['x_error_m']) else "—"
@@ -1134,32 +857,29 @@ class NeuroNavApp(tk.Tk):
                 z_str = f"{row['z_error_m']:.4f}" if 'z_error_m' in row and pd.notnull(row['z_error_m']) else "—"
                 c_str = f"{row['clock_error_m']:.4f}" if 'clock_error_m' in row and pd.notnull(row['clock_error_m']) else "—"
                 s_id = str(row['satellite_id']) if 'satellite_id' in row and pd.notnull(row['satellite_id']) else "—"
-                
-                tag = 'even' if idx % 2 == 0 else 'odd'
-                self.full_table.insert('', 'end', values=(idx + 1, t_str, x_str, y_str, z_str, c_str, s_id), tags=(tag,))
+                self.full_table.insert('', 'end', values=(idx + 1, t_str, x_str, y_str, z_str, c_str, s_id))
 
             t_min = df['utc_time'].min().strftime('%Y-%m-%d')
             t_max = df['utc_time'].max().strftime('%Y-%m-%d')
             self.full_ds_badge.config(
-                text=f"● {len(df):,} RECORDS LOADED | {t_min} → {t_max} | PROFILE: {detected}",
-                fg=AERO_THEME['accent_glow']
+                text=f"{len(df):,} Total Rows | {t_min} to {t_max} | Profile: {detected}"
             )
             self.status_lbl.config(
-                text=f"● READY: Ingested {path.name} ({len(df):,} records). Launch inference below.",
-                fg=AERO_THEME['success']
+                text=f"Loaded {path.name} successfully ({len(df):,} rows). Ready to compute.",
+                fg=BW_THEME['fg_primary']
             )
+
         except Exception as exc:
             messagebox.showerror("Ingestion Error", f"Failed to load dataset: {exc}")
-            self.status_lbl.config(text=f"▲ Error loading file: {exc}", fg=AERO_THEME['error'])
+            self.status_lbl.config(text=f"Error loading file: {exc}", fg=BW_THEME['fg_secondary'])
 
     def _start_computation(self) -> None:
         if self.input_df is None or self.input_df.empty:
             messagebox.showwarning("No Data", "Please select or load a training dataset first.")
             return
 
-        self.compute_btn.config_state('disabled')
-        self.compute_btn.set_text("Computing ML Predictions... ⏳")
-        self.status_lbl.config(text="● RUNNING INFERENCE: Multi-channel residual forecast...", fg=AERO_THEME['accent_glow'])
+        self.compute_btn.config(state='disabled', text="Computing ML Predictions... ⏳")
+        self.status_lbl.config(text="Executing model inference in background...", fg=BW_THEME['fg_primary'])
 
         thread = threading.Thread(target=self._run_model_thread, daemon=True)
         thread.start()
@@ -1176,22 +896,24 @@ class NeuroNavApp(tk.Tk):
                 target_series=series
             )
             self.predictions_df = preds
+
             self.after(0, self._on_computation_finished)
         except Exception as exc:
             self.after(0, lambda: self._on_computation_failed(str(exc)))
 
     def _on_computation_failed(self, err_msg: str) -> None:
-        self.compute_btn.config_state('normal')
-        self.compute_btn.set_text("Compute ML Forecast Predictions ➔")
-        self.status_lbl.config(text=f"▲ Computation failed: {err_msg}", fg=AERO_THEME['error'])
+        self.compute_btn.config(state='normal', text="Compute ML Forecast Predictions ➔")
+        self.status_lbl.config(text=f"Computation failed: {err_msg}", fg=BW_THEME['fg_secondary'])
         messagebox.showerror("Computation Error", f"Model prediction error: {err_msg}")
 
     def _on_computation_finished(self) -> None:
-        self.compute_btn.config_state('normal')
-        self.compute_btn.set_text("Compute ML Forecast Predictions ➔")
-        self.status_lbl.config(text="● INFERENCE COMPLETE! Advancing to Predictions...", fg=AERO_THEME['success'])
+        self.compute_btn.config(state='normal', text="Compute ML Forecast Predictions ➔")
+        self.status_lbl.config(text="Computation complete! Advancing to Page 2...", fg=BW_THEME['fg_primary'])
 
+        # Populate Page 2
         self._populate_predictions_page()
+
+        # Advance to Page 2
         self.show_page(2)
 
     def _populate_predictions_page(self) -> None:
@@ -1205,16 +927,15 @@ class NeuroNavApp(tk.Tk):
             py = f"{row.get('predicted_y_error_m', 0.0):.4f}"
             pz = f"{row.get('predicted_z_error_m', 0.0):.4f}"
             pc = f"{row.get('predicted_clock_error_m', 0.0):.4f}"
-            tag = 'even' if idx % 2 == 0 else 'odd'
-            self.pred_table.insert('', 'end', values=(idx + 1, t_str, px, py, pz, pc), tags=(tag,))
+            self.pred_table.insert('', 'end', values=(idx + 1, t_str, px, py, pz, pc))
 
-        model_name = self.selected_model.get().split('(')[0].strip()
+        model_name = self.selected_model.get()
         orbit_val = self.detected_orbit.get()
         t_start = self.predictions_df['utc_time'].min().strftime('%Y-%m-%d %H:%M')
         t_end = self.predictions_df['utc_time'].max().strftime('%Y-%m-%d %H:%M')
         count = len(self.predictions_df)
         self.p2_banner.config(
-            text=f"MODEL: {model_name.upper()} · PROFILE: {orbit_val.upper()} · {count} EPOCHS PREDICTED ({t_start} → {t_end})"
+            text=f"Model: {model_name}   |   Profile: {orbit_val}   |   Total Predicted Epochs: {count}   ({t_start} → {t_end})"
         )
 
     def _browse_8th_day_file(self) -> None:
@@ -1230,13 +951,6 @@ class NeuroNavApp(tk.Tk):
         if chosen:
             self._load_8th_day_file(Path(chosen))
 
-    def _load_sample_geo_test(self) -> None:
-        p = PROJECT_ROOT / 'Data_PS-08' / 'DATA_GEO_Test.csv'
-        if p.exists():
-            self._load_8th_day_file(p)
-        else:
-            messagebox.showwarning("File Missing", f"Could not find sample test at {p}")
-
     def _load_8th_day_file(self, path: Path) -> None:
         try:
             df = load_dataset_file(path)
@@ -1246,10 +960,9 @@ class NeuroNavApp(tk.Tk):
             t_min = df['utc_time'].min().strftime('%m/%d %H:%M')
             t_max = df['utc_time'].max().strftime('%m/%d %H:%M')
             self.gt_badge.config(
-                text=f"● {path.name} ({len(df):,} obs, {t_min} → {t_max})",
-                fg=AERO_THEME['success']
+                text=f"{path.name} ({len(df):,} obs, {t_min} - {t_max})"
             )
-            self.compare_btn.config_state('normal')
+            self.compare_btn.config(state='normal')
         except Exception as exc:
             messagebox.showerror("Ground Truth Error", f"Failed to load 8th-day file: {exc}")
 
@@ -1273,13 +986,19 @@ class NeuroNavApp(tk.Tk):
             self.predictions_df = aligned_preds
             self._populate_predictions_page()
 
+            # Statistical evaluation
             merged, metrics, summary = compare_and_evaluate(aligned_preds, self.ground_truth_df, alpha=0.05)
             self.eval_merged_df = merged
             self.eval_metrics = metrics
             self.eval_summary = summary
 
+            # Populate Shapiro-Wilk Table on Page 3
             self._populate_shapiro_table(metrics, summary)
+
+            # Render Matplotlib plots on Page 3
             self._render_plot()
+
+            # Advance directly to Page 3
             self.show_page(3)
 
         except Exception as exc:
@@ -1290,28 +1009,27 @@ class NeuroNavApp(tk.Tk):
 
         for m in metrics:
             tag = 'pass' if not m.reject_normality else 'reject'
-            status_badge = "● PASS (Normal)" if not m.reject_normality else "▲ REJECT H0 (Non-Gaussian)"
             self.shapiro_table.insert('', 'end', values=(
                 m.target_label,
                 f"{m.shapiro_w:.4f}",
                 f"{m.p_value:.4e}" if m.p_value < 0.001 else f"{m.p_value:.4f}",
                 "0.05",
-                status_badge,
+                m.hypothesis_result_str,
                 f"{m.mean_bias:.4f}",
                 f"{m.std_dev:.4f}",
                 f"{m.mae:.4f}",
                 f"{m.rmse:.4f}"
             ), tags=(tag,))
 
-        # Macro Average Total Row
+        # Macro Average Row
         w_avg = summary['average_shapiro_w']
         p_avg = summary['average_p_value']
         mae_avg = summary['overall_mae']
         rmse_avg = summary['overall_rmse']
-        pass_rate = f"{summary['total_tests'] - summary['rejected_count']}/{summary['total_tests']} PASSED"
+        pass_rate = f"{summary['total_tests'] - summary['rejected_count']}/{summary['total_tests']} Passed"
 
         self.shapiro_table.insert('', 'end', values=(
-            "★ MACRO AVERAGE",
+            "★ Macro Average",
             f"{w_avg:.4f}",
             f"{p_avg:.4f}",
             "0.05",
@@ -1329,7 +1047,7 @@ class NeuroNavApp(tk.Tk):
         plot_mode = self.current_plot_type.get()
         self.fig.clf()
         axes = self.fig.subplots(2, 2)
-        self.fig.patch.set_facecolor(AERO_THEME['bg_surface'])
+        self.fig.patch.set_facecolor(BW_THEME['bg_input'])
 
         targets_to_plot = [t for t in TARGETS if f'residual_{t}' in self.eval_merged_df.columns]
 
@@ -1343,47 +1061,47 @@ class NeuroNavApp(tk.Tk):
             res_vals = self.eval_merged_df[res_col].dropna().to_numpy()
             label = TARGET_LABELS.get(target, target)
 
-            # Dark Aerospace Subplot Styling
-            ax.set_facecolor(AERO_THEME['bg_app'])
-            ax.tick_params(colors=AERO_THEME['fg_secondary'], labelsize=9)
+            # Pure Black & White Axes Style
+            ax.set_facecolor(BW_THEME['bg_surface'])
+            ax.tick_params(colors='#ffffff', labelsize=10)
             for spine in ax.spines.values():
-                spine.set_color(AERO_THEME['border'])
-                spine.set_linewidth(1.0)
-            ax.grid(alpha=0.35, color=AERO_THEME['border'], linestyle=':')
+                spine.set_color('#ffffff')
 
             m = next((item for item in self.eval_metrics if item.target == target), None)
             w_str = f"W = {m.shapiro_w:.4f}" if m else ""
 
-            if "Histogram" in plot_mode:
-                # Cyan Bars with Glowing Cyan Edge
+            if plot_mode == 'distribution':
+                # Black and White Histogram with White Density Curve
                 counts, bins, _ = ax.hist(
                     res_vals, bins=16, density=True,
-                    color=AERO_THEME['accent_dark'], edgecolor=AERO_THEME['accent_glow'], linewidth=1.2, alpha=0.85
+                    color='#333333', edgecolor='#ffffff', linewidth=1.0
                 )
                 if len(res_vals) > 1 and np.std(res_vals) > 0:
                     x_axis = np.linspace(res_vals.min(), res_vals.max(), 120)
                     pdf = stats.norm.pdf(x_axis, np.mean(res_vals), np.std(res_vals))
-                    ax.plot(x_axis, pdf, color=AERO_THEME['accent_glow'], linewidth=2.2, linestyle='-', label='Gaussian Fit')
+                    ax.plot(x_axis, pdf, color='#ffffff', linewidth=2.0, linestyle='-', label='Gaussian Fit')
 
-                ax.set_title(f"{label}  [{w_str}]", color=AERO_THEME['fg_primary'], fontsize=11, fontweight='bold', fontfamily=FONT_UI)
-                ax.set_xlabel("Residual (m)", color=AERO_THEME['fg_secondary'], fontsize=9, fontfamily=FONT_UI)
+                ax.set_title(f"{label}  ({w_str})", color='#ffffff', fontsize=12, fontweight='bold', fontfamily=FONT_FAMILY)
+                ax.set_xlabel("Residual (m)", color='#cccccc', fontsize=11, fontfamily=FONT_FAMILY)
+                ax.grid(alpha=0.2, color='#ffffff', linestyle=':')
 
-            else:
-                # Q-Q Plot with Cyan Scatter Markers
+            elif plot_mode == 'qq':
+                # Normal Q-Q Plot in Black and White
                 stats.probplot(res_vals, dist="norm", plot=ax)
                 ax.get_lines()[0].set_marker('o')
-                ax.get_lines()[0].set_markersize(4.5)
-                ax.get_lines()[0].set_markerfacecolor(AERO_THEME['accent_glow'])
-                ax.get_lines()[0].set_markeredgecolor(AERO_THEME['accent'])
-                ax.get_lines()[1].set_color(AERO_THEME['fg_secondary'])
+                ax.get_lines()[0].set_markersize(4)
+                ax.get_lines()[0].set_markerfacecolor('#ffffff')
+                ax.get_lines()[0].set_markeredgecolor('#ffffff')
+                ax.get_lines()[1].set_color('#aaaaaa')
                 ax.get_lines()[1].set_linewidth(1.8)
                 ax.get_lines()[1].set_linestyle('--')
 
-                ax.set_title(f"Q-Q: {label}  [{w_str}]", color=AERO_THEME['fg_primary'], fontsize=11, fontweight='bold', fontfamily=FONT_UI)
-                ax.set_xlabel("Theoretical Normal Quantiles", color=AERO_THEME['fg_secondary'], fontsize=9, fontfamily=FONT_UI)
-                ax.set_ylabel("Residual Quantiles", color=AERO_THEME['fg_secondary'], fontsize=9, fontfamily=FONT_UI)
+                ax.set_title(f"Q-Q: {label}  ({w_str})", color='#ffffff', fontsize=12, fontweight='bold', fontfamily=FONT_FAMILY)
+                ax.set_xlabel("Theoretical Normal Quantiles", color='#cccccc', fontsize=11, fontfamily=FONT_FAMILY)
+                ax.set_ylabel("Residual Quantiles", color='#cccccc', fontsize=11, fontfamily=FONT_FAMILY)
+                ax.grid(alpha=0.2, color='#ffffff', linestyle=':')
 
-        self.fig.tight_layout(pad=2.4)
+        self.fig.tight_layout(pad=2.2)
         self.canvas.draw()
 
     def _export_predictions_csv(self) -> None:
