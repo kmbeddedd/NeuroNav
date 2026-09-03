@@ -55,7 +55,7 @@ class HorizonGRU(nn.Module):
         # + continuous forecast horizon
         # + horizon-regime embedding.
         self.head = nn.Sequential(
-            nn.Linear(hidden_size + 1 + 4, 32),
+            nn.Linear(hidden_size + 2 + 4, 32),
             nn.ReLU(),
             nn.Linear(32, 4),
         )
@@ -83,10 +83,13 @@ class HorizonGRU(nn.Module):
             horizon_regime
         )
 
+        horizon_norm = horizon / 1440.0
+
         combined = torch.cat(
             [
                 history_repr,
                 horizon,
+                horizon_norm,
                 regime_repr,
             ],
             dim=1,
