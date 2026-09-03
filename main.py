@@ -1,9 +1,18 @@
 import argparse
+import os
 import sys
+from pathlib import Path
+
+# Ensure working directory is NeuroNav root so relative paths always resolve
+NEURONAV_ROOT = Path(__file__).resolve().parent
+if Path.cwd() != NEURONAV_ROOT:
+    os.chdir(NEURONAV_ROOT)
+if str(NEURONAV_ROOT) not in sys.path:
+    sys.path.insert(0, str(NEURONAV_ROOT))
 
 def main():
-    parser = argparse.ArgumentParser(description='GNSS Satellite Orbit & Clock Error Forecasting CLI', formatter_class=argparse.RawDescriptionHelpFormatter, epilog='\nExamples:\n  python main.py --model audit --data data_acquisition/CLEAN_GNSS_BENCHMARK.csv --report ./results/local/data_quality_report.json --strict\n  python main.py --model bilstm --data data_acquisition/CLEAN_GNSS_BENCHMARK.csv --output ./results/local/bilstm\n  python main.py --model transformer --data data_acquisition/CLEAN_GNSS_BENCHMARK.csv --output ./results/local/transformer\n  python main.py --model baselines --data data_acquisition/CLEAN_GNSS_BENCHMARK.csv --output ./results/local/baseline_metrics.json\n  python main.py --model tune --data data_acquisition/CLEAN_GNSS_BENCHMARK.csv --n-trials 15\n        ')
-    parser.add_argument('--model', choices=['bilstm', 'transformer', 'tune', 'audit', 'baselines', 'orbitiq', 'eval_orbitiq', 'ps08', 'compare'], default='bilstm', help='Pipeline: bilstm, transformer, tune, audit, baselines, orbitiq, eval_orbitiq, ps08, or compare')
+    parser = argparse.ArgumentParser(description='GNSS Satellite Orbit & Clock Error Forecasting CLI', formatter_class=argparse.RawDescriptionHelpFormatter, epilog='\nExamples:\n  python main.py --model gui\n  python main.py --model audit --data data_acquisition/CLEAN_GNSS_BENCHMARK.csv --report ./results/local/data_quality_report.json --strict\n  python main.py --model bilstm --data data_acquisition/CLEAN_GNSS_BENCHMARK.csv --output ./results/local/bilstm\n  python main.py --model transformer --data data_acquisition/CLEAN_GNSS_BENCHMARK.csv --output ./results/local/transformer\n  python main.py --model baselines --data data_acquisition/CLEAN_GNSS_BENCHMARK.csv --output ./results/local/baseline_metrics.json\n  python main.py --model tune --data data_acquisition/CLEAN_GNSS_BENCHMARK.csv --n-trials 15\n        ')
+    parser.add_argument('--model', choices=['gui', 'bilstm', 'transformer', 'tune', 'audit', 'baselines', 'orbitiq', 'eval_orbitiq', 'ps08', 'compare'], default='gui', help='Pipeline: gui (default), bilstm, transformer, tune, audit, baselines, orbitiq, eval_orbitiq, ps08, or compare')
     args, remaining_argv = parser.parse_known_args()
     sys.argv = [sys.argv[0]] + remaining_argv
     if args.model == 'bilstm':
@@ -33,5 +42,8 @@ def main():
     elif args.model == 'compare':
         from scripts.model_comparison_window import main as run_comparison
         run_comparison()
+    elif args.model == 'gui':
+        from gui_app import main as run_gui
+        run_gui()
 if __name__ == '__main__':
     main()
