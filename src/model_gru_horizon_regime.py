@@ -45,9 +45,17 @@ class HorizonGRU(nn.Module):
             batch_first=True,
         )
 
-        # History representation + forecast horizon.
+        # Encode the discrete forecast-horizon regime.
+        self.horizon_embedding = nn.Embedding(
+            num_embeddings=6,
+            embedding_dim=4,
+        )
+
+        # History representation
+        # + continuous forecast horizon
+        # + horizon-regime embedding.
         self.head = nn.Sequential(
-            nn.Linear(hidden_size + 1, 32),
+            nn.Linear(hidden_size + 1 + 4, 32),
             nn.ReLU(),
             nn.Linear(32, 4),
         )
@@ -57,6 +65,7 @@ class HorizonGRU(nn.Module):
         x,
         lengths,
         horizon,
+        horizon_regime,
     ):
 
         packed = nn.utils.rnn.pack_padded_sequence(
@@ -70,8 +79,16 @@ class HorizonGRU(nn.Module):
 
         history_repr = hidden[-1]
 
+        regime_repr = self.horizon_embedding(
+            horizon_regime
+        )
+
         combined = torch.cat(
-            [history_repr, horizon],
+            [
+                history_repr,
+                horizon,
+                regime_repr,
+            ],
             dim=1,
         )
 
@@ -189,9 +206,23 @@ def make_sequence(history, target_time):
         - pd.Timestamp(history["utc_time"].iloc[-1])
     ).total_seconds() / 60.0
 
+    if horizon < 120:
+        horizon_regime = 0
+    elif horizon < 360:
+        horizon_regime = 1
+    elif horizon < 720:
+        horizon_regime = 2
+    elif horizon < 1200:
+        horizon_regime = 3
+    elif horizon < 1800:
+        horizon_regime = 4
+    else:
+        horizon_regime = 5
+
     return (
         sequence.astype(float),
         float(horizon),
+        int(horizon_regime),
     )
 
 
@@ -200,6 +231,7 @@ def build_training_examples(df):
     sequences = []
     horizons = []
     targets = []
+    horizon_regimes = []
 
     df = (
         df
@@ -222,10 +254,11 @@ def build_training_examples(df):
         if result is None:
             continue
 
-        sequence, horizon = result
+        sequence, horizon, horizon_regime = result
 
         sequences.append(sequence)
         horizons.append(horizon)
+        horizon_regimes.append(horizon_regime)
 
         targets.append(
             df.loc[
@@ -237,6 +270,7 @@ def build_training_examples(df):
     return (
         sequences,
         np.asarray(horizons, dtype=float),
+        np.asarray(horizon_regimes, dtype=np.int64),
         np.asarray(targets, dtype=float),
     )
 
@@ -249,6 +283,7 @@ def build_validation_examples(
     sequences = []
     horizons = []
     targets = []
+    horizon_regimes = []
 
     for _, row in (
         validation_df
@@ -266,10 +301,11 @@ def build_validation_examples(
         if result is None:
             continue
 
-        sequence, horizon = result
+        sequence, horizon, horizon_regime = result
 
         sequences.append(sequence)
         horizons.append(horizon)
+        horizon_regimes.append(horizon_regime)
 
         targets.append(
             row[ERROR_COLS]
@@ -280,6 +316,7 @@ def build_validation_examples(
     return (
         sequences,
         np.asarray(horizons, dtype=float),
+        np.asarray(horizon_regimes, dtype=np.int64),
         np.asarray(targets, dtype=float),
     )
 
@@ -351,6 +388,7 @@ def train_model(
     lengths,
     horizons_scaled,
     horizons_raw,
+    horizon_regimes,
     y,
 ):
 
@@ -381,6 +419,12 @@ def train_model(
     device=DEVICE,
     )
 
+    horizon_regime_tensor = torch.tensor(
+    horizon_regimes,
+    dtype=torch.long,
+    device=DEVICE,
+    )
+
     weights = torch.tensor(
     horizon_weights(horizons_raw),
     dtype=torch.float32,
@@ -403,6 +447,7 @@ def train_model(
             X_tensor,
             lengths_tensor,
             horizon_tensor,
+            horizon_regime_tensor,
         )
 
         loss = (
@@ -456,6 +501,7 @@ def main():
             (
                 train_sequences,
                 train_horizons,
+                train_horizon_regimes,
                 y_train,
             ) = build_training_examples(
                 train_df
@@ -464,6 +510,7 @@ def main():
             (
                 val_sequences,
                 val_horizons,
+                val_horizon_regimes,
                 y_val,
             ) = build_validation_examples(
                 train_df,
@@ -538,6 +585,7 @@ def main():
                 train_lengths,
                 train_horizons_scaled,
                 train_horizons,
+                train_horizon_regimes,
                 y_train_scaled,
             )
 
@@ -559,6 +607,11 @@ def main():
                     torch.tensor(
                         val_horizons_scaled.reshape(-1, 1),
                         dtype=torch.float32,
+                        device=DEVICE,
+                    ),
+                    torch.tensor(
+                        val_horizon_regimes,
+                        dtype=torch.long,
                         device=DEVICE,
                     ),
                 ).cpu().numpy()
