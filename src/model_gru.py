@@ -47,6 +47,7 @@ class GRUModel(nn.Module):
         )
 
     def forward(self, x, lengths):
+
         packed = nn.utils.rnn.pack_padded_sequence(
             x,
             lengths.cpu(),
@@ -60,6 +61,7 @@ class GRUModel(nn.Module):
 
 
 def load_data(path):
+
     df = pd.read_csv(path)
 
     df.columns = (
@@ -68,7 +70,9 @@ def load_data(path):
         .str.replace(r"\s+", " ", regex=True)
     )
 
-    df["utc_time"] = pd.to_datetime(df["utc_time"])
+    df["utc_time"] = pd.to_datetime(
+        df["utc_time"]
+    )
 
     for col in ERROR_COLS:
         df[col] = pd.to_numeric(df[col])
@@ -82,21 +86,16 @@ def load_data(path):
 
 
 def make_sequence(history, target_time):
-    """
-    Build one irregular-time sequence.
-
-    Features at every historical observation:
-      X, Y, Z, clock
-      minutes from observation to target
-      minutes from previous observation
-    """
 
     if len(history) < MIN_HISTORY:
         return None
 
-    history = history.sort_values("utc_time").copy()
+    history = (
+        history
+        .sort_values("utc_time")
+        .copy()
+    )
 
-    # Make sure target_time is a pandas Timestamp.
     target_time = pd.Timestamp(target_time)
 
     history_start = (
@@ -112,27 +111,25 @@ def make_sequence(history, target_time):
     if len(history) < MIN_HISTORY:
         return None
 
-    values = history[
-        ERROR_COLS
-    ].astype(float).to_numpy()
+    values = (
+        history[ERROR_COLS]
+        .astype(float)
+        .to_numpy()
+    )
 
-    # Convert timestamps to integer nanoseconds.
     times = (
         history["utc_time"]
         .astype("int64")
         .to_numpy()
     )
 
-    # Convert target timestamp to integer nanoseconds too.
     target_ns = target_time.value
 
-    # Actual time from each observation to target, in minutes.
-    delta_to_target = (
+    time_to_target = (
         (target_ns - times)
         / 60_000_000_000
     ).astype(float)
 
-    # Actual time between consecutive observations, in minutes.
     gaps = (
         np.diff(times)
         / 60_000_000_000
@@ -143,20 +140,26 @@ def make_sequence(history, target_time):
         gaps,
     ])
 
+    # First differences of the four error variables.
+    differences = np.zeros_like(values)
+
+    if len(values) > 1:
+        differences[1:] = np.diff(
+            values,
+            axis=0
+        )
+
     sequence = np.column_stack([
         values,
-        delta_to_target,
+        differences,
         gaps,
+        time_to_target,
     ])
 
     return sequence.astype(float)
 
 
 def build_training_examples(train_df):
-    """
-    Create one-step-ahead examples using only information
-    available before each training target.
-    """
 
     sequences = []
     targets = []
@@ -170,7 +173,8 @@ def build_training_examples(train_df):
     for i in range(MIN_HISTORY, len(train_df)):
 
         target_time = train_df.loc[
-            i, "utc_time"
+            i,
+            "utc_time"
         ]
 
         history = train_df.iloc[:i]
@@ -187,7 +191,8 @@ def build_training_examples(train_df):
 
         targets.append(
             train_df.loc[
-                i, ERROR_COLS
+                i,
+                ERROR_COLS
             ].astype(float).to_numpy()
         )
 
@@ -197,13 +202,10 @@ def build_training_examples(train_df):
     )
 
 
-def build_validation_examples(train_df, validation_df):
-    """
-    Build validation examples using ONLY the training history.
-
-    Crucially, observations from the validation day are never used
-    as inputs for other validation predictions.
-    """
+def build_validation_examples(
+    train_df,
+    validation_df,
+):
 
     sequences = []
     targets = []
@@ -247,6 +249,7 @@ def build_validation_examples(train_df, validation_df):
 
 
 def pad_sequences(sequences):
+
     max_len = max(
         len(seq)
         for seq in sequences
@@ -280,8 +283,9 @@ def train_model(
     lengths,
     y,
 ):
+
     model = GRUModel(
-        input_size=X.shape[2]
+        input_size=X.shape[2],
     ).to(DEVICE)
 
     optimizer = torch.optim.Adam(
@@ -334,7 +338,7 @@ def train_model(
 
 def main():
 
-    print("\nGRU TEMPORAL BASELINE — LEAKAGE-SAFE")
+    print("\nENHANCED GRU — TEMPORAL DIFFERENCES")
     print("=" * 90)
     print(f"Device: {DEVICE}")
 
@@ -370,7 +374,9 @@ def main():
             ].copy()
 
             train_sequences, y_train = (
-                build_training_examples(train_df)
+                build_training_examples(
+                    train_df
+                )
             )
 
             val_sequences, y_val = (
@@ -386,7 +392,7 @@ def main():
             if len(val_sequences) == 0:
                 continue
 
-            # Fit scalers ONLY on training data.
+            # Fit the input scaler on training data only.
             all_train_steps = np.concatenate(
                 train_sequences,
                 axis=0,
@@ -408,6 +414,7 @@ def main():
                 for seq in val_sequences
             ]
 
+            # Fit target scaler on training targets only.
             y_scaler = StandardScaler()
 
             y_scaler.fit(
@@ -524,13 +531,13 @@ def main():
 
     result_df.to_csv(
         output_dir /
-        "gru_fold_scores.csv",
-        index=False
+        "enhanced_gru_fold_scores.csv",
+        index=False,
     )
 
     print("\n")
     print("=" * 90)
-    print("LEAKAGE-SAFE GRU OVERALL")
+    print("ENHANCED GRU OVERALL")
     print("=" * 90)
 
     print(
@@ -546,7 +553,7 @@ def main():
     print("\nSaved:")
     print(
         "results/models/"
-        "gru_fold_scores.csv"
+        "enhanced_gru_fold_scores.csv"
     )
 
 
