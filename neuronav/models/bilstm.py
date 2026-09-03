@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from src.config import SEQ_LEN, FORECAST_HORIZON, TARGET_COLS_4
+from neuronav.config import SEQ_LEN, FORECAST_HORIZON, TARGET_COLS_4
 
 class BiLSTMGRUPyTorchModel(nn.Module):
 
@@ -52,3 +52,6 @@ class BiLSTMGRUPyTorchModel(nn.Module):
         last_obs = x[:, -1:, list(self.target_feature_indices)]
         out = last_obs + delta
         return out
+
+# Backward-compatible alias
+GNSSBiLSTMGRU = BiLSTMGRUPyTorchModel

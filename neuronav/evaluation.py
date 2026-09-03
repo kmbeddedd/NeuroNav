@@ -9,7 +9,7 @@ import numpy as np
 from scipy.special import gammaln
 from scipy.stats import anderson, kurtosis, shapiro, skew
 from scipy.stats import t as student_t_distribution
-from src.config import HORIZON_MAP, TARGET_COLS_5
+from neuronav.config import HORIZON_MAP, TARGET_COLS_5
 SPEED_OF_LIGHT_M_S = 299792458.0
 XYZ_TARGETS = ('Error_X', 'Error_Y', 'Error_Z')
 DERIVED_3D_TARGETS = frozenset({'3D_Orbit_Error', 'Orbit_3D_Error'})

@@ -1,8 +1,8 @@
 import math
 import torch
 import torch.nn as nn
-from src.models.pytorch_transformer import PositionalEncoding
-from src.config import DIFFUSION_DEFAULTS, TARGET_COLS_4
+from neuronav.models.transformer import PositionalEncoding
+from neuronav.config import DIFFUSION_DEFAULTS, TARGET_COLS_4
 
 class DiffusionSchedule:
 
@@ -98,3 +98,6 @@ def sample_ddim_forecast(diffusion_model: nn.Module, schedule: DiffusionSchedule
         noise = torch.randn_like(x_t) if eta > 0.0 and next_step is not None else 0.0
         x_t = torch.sqrt(alpha_bar_prev) * pred_x0 + dir_xt + sigma_t * noise
     return mu + x_t
+
+# Backward-compatible alias
+GNSSResidualDiffusion = ConditionalDiffusionDenoiser

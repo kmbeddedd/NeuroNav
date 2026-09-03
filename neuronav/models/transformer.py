@@ -2,7 +2,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from src.config import SEQ_LEN, FORECAST_HORIZON, TARGET_COLS_4
+from neuronav.config import SEQ_LEN, FORECAST_HORIZON, TARGET_COLS_4
 
 def compute_prn_embedding_dim(num_satellites: int) -> int:
     return int(math.ceil(1.6 * num_satellites ** 0.52))
@@ -237,3 +237,6 @@ class GNSSForecaster(nn.Module):
             mu = self.revin(mu, mode='denorm')
             sigma = self.revin(sigma, mode='denorm_sigma')
         return (mu, sigma, spike_probs, context)
+
+# Backward-compatible alias
+GNSSHybridForecaster = GNSSForecaster
