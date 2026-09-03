@@ -5,7 +5,7 @@
     "test_policy": "unique rows at supplied Day-8 arbitrary timestamps; no test feedback",
     "residual_definition": "prediction - observation",
     "primary_metric": "macro mean Shapiro-Wilk W across 3 series x 4 equally weighted targets",
-    "aggregation_rationale": "test each orbit series separately to avoid mixing distributions, then macro-average all 12 W values",
+    "aggregation_rationale": "test each orbit series separately to avoid mixing distributions, then macro-average all 12 per-series/per-target Shapiro-Wilk evaluations",
     "alpha": 0.05,
     "tie_breakers": [
       "residual mean and standard deviation",
@@ -55,6 +55,7 @@
   "winner": "Harmonic Ridge",
   "ranking": [
     "Harmonic Ridge",
+    "GEO Regime-Aware Residual",
     "Random Forest",
     "BiLSTM-GRU",
     "Persistence",
@@ -64,6 +65,10 @@
   "models": {
     "Persistence": {
       "average_shapiro_w": 0.8266477009269247,
+      "average_shapiro_w_ci_95": [
+        0.642972397885612,
+        0.9078040550448367
+      ],
       "average_p_value": 0.12657079735401244,
       "rejected_test_count": 8,
       "normality_test_count": 12,
@@ -78,6 +83,11 @@
           "shapiro_w": 0.7922448103829696,
           "p_value": 3.9623596261240064e-10,
           "hypothesis_result": 1,
+          "shapiro_w_ci_95": [
+            0.6815297757494287,
+            0.8611111240872859
+          ],
+          "ci_method": "percentile_bootstrap_b1000",
           "mean": 1.3674209264408603,
           "standard_deviation": 11.99519841620286,
           "mae": 6.590807691516129,
@@ -88,6 +98,11 @@
           "shapiro_w": 0.734958222197633,
           "p_value": 1.158489780941196e-11,
           "hypothesis_result": 1,
+          "shapiro_w_ci_95": [
+            0.6086152286835763,
+            0.819705292052284
+          ],
+          "ci_method": "percentile_bootstrap_b1000",
           "mean": 0.1884638195376346,
           "standard_deviation": 16.992107356947475,
           "mae": 8.339443327860215,
@@ -98,6 +113,11 @@
           "shapiro_w": 0.8076046250599408,
           "p_value": 1.1383879540450853e-09,
           "hypothesis_result": 1,
+          "shapiro_w_ci_95": [
+            0.6926218131659879,
+            0.8898845644198151
+          ],
+          "ci_method": "percentile_bootstrap_b1000",
           "mean": 0.9317831043978492,
           "standard_deviation": 9.04182651946015,
           "mae": 4.905674721193549,
@@ -108,6 +128,11 @@
           "shapiro_w": 0.4693220811862954,
           "p_value": 1.0301372665955651e-16,
           "hypothesis_result": 1,
+          "shapiro_w_ci_95": [
+            0.3211338573419167,
+            0.581131074702501
+          ],
+          "ci_method": "percentile_bootstrap_b1000",
           "mean": -0.5747381520537636,
           "standard_deviation": 13.671505647450545,
           "mae": 4.467238537774193,
@@ -124,6 +149,11 @@
               "shapiro_w": 0.8695599153451865,
               "p_value": 3.385701701044254e-06,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.7710795416849653,
+                0.9186222221114316
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 1.7582551073043475,
               "standard_deviation": 13.930276525182082,
               "mae": 8.797194478347825,
@@ -134,6 +164,11 @@
               "shapiro_w": 0.8211586424648608,
               "p_value": 1.0716109940903646e-07,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.6988619604339147,
+                0.8937540161486089
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 0.3405037955797103,
               "standard_deviation": 19.761212880416437,
               "mae": 11.151407495492753,
@@ -144,6 +179,11 @@
               "shapiro_w": 0.8893530149737882,
               "p_value": 1.712704812376289e-05,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.7845317509890731,
+                0.952289910680478
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 1.2714619863623189,
               "standard_deviation": 10.494602182142517,
               "mae": 6.554181634246377,
@@ -154,6 +194,11 @@
               "shapiro_w": 0.5556320138652366,
               "p_value": 3.915425768860854e-13,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.3703943756335,
+                0.666856211635203
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": -0.7957831170000003,
               "standard_deviation": 15.895886762528265,
               "mae": 5.987715298826087,
@@ -170,6 +215,11 @@
               "shapiro_w": 0.8375064297227617,
               "p_value": 0.1242920571347283,
               "hypothesis_result": 0,
+              "shapiro_w_ci_95": [
+                0.6192270693457773,
+                0.9304933043660091
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 0.29141740483333334,
               "standard_deviation": 0.10143975123433219,
               "mae": 0.29141740483333334,
@@ -180,6 +230,11 @@
               "shapiro_w": 0.9298021674956644,
               "p_value": 0.5785749696096817,
               "hypothesis_result": 0,
+              "shapiro_w_ci_95": [
+                0.6398937048230985,
+                0.945879111087427
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": -0.7157928281666667,
               "standard_deviation": 0.438340887396593,
               "mae": 0.7157928281666667,
@@ -190,6 +245,11 @@
               "shapiro_w": 0.8435100340500821,
               "p_value": 0.13935381216845744,
               "hypothesis_result": 0,
+              "shapiro_w_ci_95": [
+                0.5422800666056685,
+                0.9028969600747909
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": -0.13344309049999997,
               "standard_deviation": 0.27915175258218294,
               "mae": 0.27195762416666663,
@@ -200,6 +260,11 @@
               "shapiro_w": 0.938749072612755,
               "p_value": 0.6491363640168737,
               "hypothesis_result": 0,
+              "shapiro_w_ci_95": [
+                0.6398937048230984,
+                0.9582601751929157
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 0.2771753405,
               "standard_deviation": 0.10358532390626361,
               "mae": 0.2771753405,
@@ -216,6 +281,11 @@
               "shapiro_w": 0.8556226419250209,
               "p_value": 0.010400070682285375,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.7322332254686258,
+                0.885976618690112
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 0.22789107366666672,
               "standard_deviation": 0.23157301945697056,
               "mae": 0.23278843755555562,
@@ -226,6 +296,11 @@
               "shapiro_w": 0.8659019033567247,
               "p_value": 0.01524152157017015,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.7220198763983583,
+                0.9442054530952496
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": -0.09293720605555555,
               "standard_deviation": 0.056376214534622035,
               "mae": 0.10146418516666666,
@@ -236,6 +311,11 @@
               "shapiro_w": 0.8039545436670799,
               "p_value": 0.0017282905111246027,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.611162827170389,
+                0.9553516765793727
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": -0.01524387816666666,
               "standard_deviation": 0.22083760572720235,
               "mae": 0.13097058683333332,
@@ -246,6 +326,11 @@
               "shapiro_w": 0.7090220316439344,
               "p_value": 0.00010186264351233876,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.5840906712508741,
+                0.9390630008764417
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": -0.011370283944444441,
               "standard_deviation": 0.05255678173655098,
               "mae": 0.0354320195,
@@ -254,10 +339,14 @@
           }
         }
       },
-      "rank": 4
+      "rank": 5
     },
     "Harmonic Ridge": {
       "average_shapiro_w": 0.8488317400030047,
+      "average_shapiro_w_ci_95": [
+        0.6633304735910203,
+        0.9098654889302638
+      ],
       "average_p_value": 0.17774088149650738,
       "rejected_test_count": 7,
       "normality_test_count": 12,
@@ -272,6 +361,11 @@
           "shapiro_w": 0.7954895126771552,
           "p_value": 4.93039097438082e-10,
           "hypothesis_result": 1,
+          "shapiro_w_ci_95": [
+            0.6893944428209795,
+            0.8630212016895497
+          ],
+          "ci_method": "percentile_bootstrap_b1000",
           "mean": 0.4382417772547186,
           "standard_deviation": 12.009707494910364,
           "mae": 6.4710819740299135,
@@ -282,6 +376,11 @@
           "shapiro_w": 0.7329455347855375,
           "p_value": 1.033391168837379e-11,
           "hypothesis_result": 1,
+          "shapiro_w_ci_95": [
+            0.6028621457877786,
+            0.8154512944621206
+          ],
+          "ci_method": "percentile_bootstrap_b1000",
           "mean": -0.8566191360127184,
           "standard_deviation": 16.984301703497316,
           "mae": 8.243950048671055,
@@ -292,6 +391,11 @@
           "shapiro_w": 0.8277578593526237,
           "p_value": 4.955933876316002e-09,
           "hypothesis_result": 1,
+          "shapiro_w_ci_95": [
+            0.7012167760945797,
+            0.9124664836131591
+          ],
+          "ci_method": "percentile_bootstrap_b1000",
           "mean": 1.5136121571158145,
           "standard_deviation": 9.121316199230026,
           "mae": 5.1706108834644935,
@@ -302,6 +406,11 @@
           "shapiro_w": 0.5217505871022798,
           "p_value": 6.819622740383108e-16,
           "hypothesis_result": 1,
+          "shapiro_w_ci_95": [
+            0.3916521018749384,
+            0.617427569506391
+          ],
+          "ci_method": "percentile_bootstrap_b1000",
           "mean": -1.2381881506294008,
           "standard_deviation": 13.779257934103741,
           "mae": 5.182549797934203,
@@ -318,6 +427,11 @@
               "shapiro_w": 0.8779394964202936,
               "p_value": 6.6085402943348315e-06,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.7832310883158812,
+                0.9248956442452754
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 0.5195106638957974,
               "standard_deviation": 13.967064919057913,
               "mae": 8.627809273324576,
@@ -328,6 +442,11 @@
               "shapiro_w": 0.8258093332422527,
               "p_value": 1.454767939006457e-07,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.7078631624433999,
+                0.896051192090321
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": -1.110941310219078,
               "standard_deviation": 19.748494186184363,
               "mae": 11.045572194869168,
@@ -338,6 +457,11 @@
               "shapiro_w": 0.9052435752990227,
               "p_value": 7.053021952157934e-05,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.7858230816971217,
+                0.9645996416562618
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 2.012821435386145,
               "standard_deviation": 10.562008910899468,
               "mae": 6.90509901626757,
@@ -348,6 +472,11 @@
               "shapiro_w": 0.6006183132230987,
               "p_value": 2.072243392016572e-12,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.4442316425189592,
+                0.6989822219587832
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": -1.6871101065316554,
               "standard_deviation": 16.00260461215886,
               "mae": 6.961439624534836,
@@ -364,6 +493,11 @@
               "shapiro_w": 0.9396262242587354,
               "p_value": 0.6561885005020496,
               "hypothesis_result": 0,
+              "shapiro_w_ci_95": [
+                0.6398937048230985,
+                0.9452555448538655
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 0.6170545495374135,
               "standard_deviation": 0.16699928880209788,
               "mae": 0.6170545495374135,
@@ -374,6 +508,11 @@
               "shapiro_w": 0.928857641175876,
               "p_value": 0.5713093210215092,
               "hypothesis_result": 0,
+              "shapiro_w_ci_95": [
+                0.6398937048230986,
+                0.9475092622405646
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": -0.26145553163475316,
               "standard_deviation": 0.45455737227418347,
               "mae": 0.3879963458955455,
@@ -384,6 +523,11 @@
               "shapiro_w": 0.8793137028135424,
               "p_value": 0.2659202684438685,
               "hypothesis_result": 0,
+              "shapiro_w_ci_95": [
+                0.6290184201043627,
+                0.8957598737605537
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 0.32520888320206315,
               "standard_deviation": 0.30897379233980216,
               "mae": 0.32520888320206315,
@@ -394,6 +538,11 @@
               "shapiro_w": 0.9159824951972146,
               "p_value": 0.47690643900537266,
               "hypothesis_result": 0,
+              "shapiro_w_ci_95": [
+                0.6046023982543144,
+                0.9283883568182961
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 0.14517368796344216,
               "standard_deviation": 0.18858077695079314,
               "mae": 0.16580078097159598,
@@ -410,6 +559,11 @@
               "shapiro_w": 0.8264618409272788,
               "p_value": 0.0036830646585807457,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.6836221941953572,
+                0.8920963887305954
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 0.06710678770301799,
               "standard_deviation": 0.21843061874986694,
               "mae": 0.15496980156455742,
@@ -420,6 +574,11 @@
               "shapiro_w": 0.9241158509182331,
               "p_value": 0.15289044595006474,
               "hypothesis_result": 0,
+              "shapiro_w_ci_95": [
+                0.7949892216446158,
+                0.9440848795413953
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": -0.08010533634766265,
               "standard_deviation": 0.11832205018116593,
               "mae": 0.12304972250345173,
@@ -430,6 +589,11 @@
               "shapiro_w": 0.8392899258596096,
               "p_value": 0.005766704947424024,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.6599984468456948,
+                0.9514624305252652
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": -0.0038889849492013654,
               "standard_deviation": 0.2231141586735366,
               "mae": 0.13687370780684147,
@@ -440,6 +604,11 @@
               "shapiro_w": 0.7227224807008968,
               "p_value": 0.00014854919053712646,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.5867986174263391,
+                0.9293004307419899
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 0.021558734131628274,
               "standard_deviation": 0.055478382507795056,
               "mae": 0.03572180161931731,
@@ -452,6 +621,10 @@
     },
     "Random Forest": {
       "average_shapiro_w": 0.847137981709614,
+      "average_shapiro_w_ci_95": [
+        0.6621340710591995,
+        0.9091334942091519
+      ],
       "average_p_value": 0.2173854124913895,
       "rejected_test_count": 6,
       "normality_test_count": 12,
@@ -466,6 +639,11 @@
           "shapiro_w": 0.7977083346678183,
           "p_value": 5.732784353038615e-10,
           "hypothesis_result": 1,
+          "shapiro_w_ci_95": [
+            0.6944004485428352,
+            0.8612883513349391
+          ],
+          "ci_method": "percentile_bootstrap_b1000",
           "mean": 1.2259409649432833,
           "standard_deviation": 11.950553909777668,
           "mae": 6.563226532259072,
@@ -476,6 +654,11 @@
           "shapiro_w": 0.7413337855696783,
           "p_value": 1.670375576917659e-11,
           "hypothesis_result": 1,
+          "shapiro_w_ci_95": [
+            0.6181167547707929,
+            0.8257979159616683
+          ],
+          "ci_method": "percentile_bootstrap_b1000",
           "mean": 0.5661770499097157,
           "standard_deviation": 17.29533903810104,
           "mae": 8.633901918085199,
@@ -486,6 +669,11 @@
           "shapiro_w": 0.8130932779065025,
           "p_value": 1.6820302491591355e-09,
           "hypothesis_result": 1,
+          "shapiro_w_ci_95": [
+            0.6993305123826816,
+            0.894785642268328
+          ],
+          "ci_method": "percentile_bootstrap_b1000",
           "mean": 2.1047402071122625,
           "standard_deviation": 8.974874479519192,
           "mae": 5.227295896894846,
@@ -496,6 +684,11 @@
           "shapiro_w": 0.471833599826002,
           "p_value": 1.1241453539295112e-16,
           "hypothesis_result": 1,
+          "shapiro_w_ci_95": [
+            0.3244574100147508,
+            0.5845978044556372
+          ],
+          "ci_method": "percentile_bootstrap_b1000",
           "mean": -0.4356712368587026,
           "standard_deviation": 13.873217176242251,
           "mae": 4.599779938048661,
@@ -512,6 +705,11 @@
               "shapiro_w": 0.8723551071824545,
               "p_value": 4.220494915468009e-06,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.774133736478718,
+                0.9199017105528539
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 1.6400550886150944,
               "standard_deviation": 13.875363576880648,
               "mae": 8.776425559862655,
@@ -522,6 +720,11 @@
               "shapiro_w": 0.8236288439273385,
               "p_value": 1.2597563041808074e-07,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.697899872584046,
+                0.8948849329377401
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 0.8036626144371634,
               "standard_deviation": 20.11114767121898,
               "mae": 11.573221754188374,
@@ -532,6 +735,11 @@
               "shapiro_w": 0.8790017220297835,
               "p_value": 7.206015208475141e-06,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.7712354982457681,
+                0.953237969065952
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 2.8144752301755256,
               "standard_deviation": 10.34280008386336,
               "mae": 6.978116197928205,
@@ -542,6 +750,11 @@
               "shapiro_w": 0.5568441754070673,
               "p_value": 4.0886967580012465e-13,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.3719675734959886,
+                0.6668956827676842
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": -0.5977666144448142,
               "standard_deviation": 16.133491117973957,
               "mae": 6.181968087524411,
@@ -558,6 +771,11 @@
               "shapiro_w": 0.8554202632170522,
               "p_value": 0.17399910550360032,
               "hypothesis_result": 0,
+              "shapiro_w_ci_95": [
+                0.6259933656037627,
+                0.9171395463861048
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 0.20616208328541194,
               "standard_deviation": 0.10354805684539103,
               "mae": 0.20616208328541194,
@@ -568,6 +786,11 @@
               "shapiro_w": 0.9344078176793429,
               "p_value": 0.6145447292501756,
               "hypothesis_result": 0,
+              "shapiro_w_ci_95": [
+                0.6398937048230985,
+                0.952400060675636
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": -0.2552302943186848,
               "standard_deviation": 0.5027750443462895,
               "mae": 0.41806172405727565,
@@ -578,6 +801,11 @@
               "shapiro_w": 0.8498345729701063,
               "p_value": 0.15692160813128364,
               "hypothesis_result": 0,
+              "shapiro_w_ci_95": [
+                0.5649133397038554,
+                0.9014736722070724
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 0.04288805276085383,
               "standard_deviation": 0.27329931581133793,
               "mae": 0.207557698004921,
@@ -588,6 +816,11 @@
               "shapiro_w": 0.9361039164849969,
               "p_value": 0.6279910041527913,
               "hypothesis_result": 0,
+              "shapiro_w_ci_95": [
+                0.5922174045947347,
+                0.954842736994523
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 0.11644162116972263,
               "standard_deviation": 0.11948473767790463,
               "mae": 0.12532131841613667,
@@ -604,6 +837,11 @@
               "shapiro_w": 0.9304987764768132,
               "p_value": 0.19815015882071807,
               "hypothesis_result": 0,
+              "shapiro_w_ci_95": [
+                0.8126315370301161,
+                0.9376845926428463
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": -0.021570215246036546,
               "standard_deviation": 0.2612326055633982,
               "mae": 0.1983184094365583,
@@ -614,6 +852,11 @@
               "shapiro_w": 0.9699446045742608,
               "p_value": 0.796646512733304,
               "hypothesis_result": 0,
+              "shapiro_w_ci_95": [
+                0.820412103685969,
+                0.9704558272924341
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": -0.0703818327027001,
               "standard_deviation": 0.10461089885806572,
               "mae": 0.10512261103232973,
@@ -624,6 +867,11 @@
               "shapiro_w": 0.8911127220235684,
               "p_value": 0.040326869937717245,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.7350012284885641,
+                0.9053156598309745
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 0.07137333682022448,
               "standard_deviation": 0.2646893956589078,
               "mae": 0.1890641425636108,
@@ -634,6 +882,11 @@
               "shapiro_w": 0.6665032585425827,
               "p_value": 3.3408880921012646e-05,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.5393094879757723,
+                0.9353695391560006
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 0.0016567578785830702,
               "standard_deviation": 0.04964071553375898,
               "mae": 0.026211571602452643,
@@ -642,10 +895,14 @@
           }
         }
       },
-      "rank": 2
+      "rank": 3
     },
     "Gaussian Process": {
       "average_shapiro_w": 0.8214551848853707,
+      "average_shapiro_w_ci_95": [
+        0.6361131521980836,
+        0.9046832003478923
+      ],
       "average_p_value": 0.12663108503286366,
       "rejected_test_count": 7,
       "normality_test_count": 12,
@@ -660,6 +917,11 @@
           "shapiro_w": 0.781181612612441,
           "p_value": 1.9118135077212497e-10,
           "hypothesis_result": 1,
+          "shapiro_w_ci_95": [
+            0.6664212921301319,
+            0.8516479153712719
+          ],
+          "ci_method": "percentile_bootstrap_b1000",
           "mean": -0.1544291323735481,
           "standard_deviation": 11.977356732010913,
           "mae": 6.233290440631357,
@@ -670,6 +932,11 @@
           "shapiro_w": 0.7271027684948891,
           "p_value": 7.441011437540351e-12,
           "hypothesis_result": 1,
+          "shapiro_w_ci_95": [
+            0.5979062539440824,
+            0.8117603878518405
+          ],
+          "ci_method": "percentile_bootstrap_b1000",
           "mean": -1.120457181352701,
           "standard_deviation": 17.004726048515163,
           "mae": 8.187052529314565,
@@ -680,6 +947,11 @@
           "shapiro_w": 0.8062390529813916,
           "p_value": 1.0341796165322618e-09,
           "hypothesis_result": 1,
+          "shapiro_w_ci_95": [
+            0.6906511817837526,
+            0.888152835883282
+          ],
+          "ci_method": "percentile_bootstrap_b1000",
           "mean": 0.8779778553036415,
           "standard_deviation": 9.03972097293432,
           "mae": 4.877790694460486,
@@ -690,6 +962,11 @@
           "shapiro_w": 0.47044419857563674,
           "p_value": 1.0710856258307382e-16,
           "hypothesis_result": 1,
+          "shapiro_w_ci_95": [
+            0.32267075248998334,
+            0.5817647381712353
+          ],
+          "ci_method": "percentile_bootstrap_b1000",
           "mean": -0.51635695800366,
           "standard_deviation": 13.671155696184114,
           "mae": 4.480057309249767,
@@ -706,6 +983,11 @@
               "shapiro_w": 0.8695635291935732,
               "p_value": 3.3866607998582814e-06,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.7710867404810512,
+                0.9186193991725659
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": -0.22996801733354957,
               "standard_deviation": 13.930286874309825,
               "mae": 8.344399602080848,
@@ -716,6 +998,11 @@
               "shapiro_w": 0.8211601942637873,
               "p_value": 1.0717194345721321e-07,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.6988617161169277,
+                0.8937576529391055
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": -1.5446240539318121,
               "standard_deviation": 19.761225188464117,
               "mae": 10.996538249059183,
@@ -726,6 +1013,11 @@
               "shapiro_w": 0.8893674904078072,
               "p_value": 1.714830008183121e-05,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.7845591722035526,
+                0.9522883276668468
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 1.2013433510797675,
               "standard_deviation": 10.494609162494172,
               "mae": 6.53762555886639,
@@ -736,6 +1028,11 @@
               "shapiro_w": 0.5556369743988602,
               "p_value": 3.9161189991544817e-13,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.370400757547571,
+                0.6668574021184341
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": -0.7190344891337391,
               "standard_deviation": 15.895903862372593,
               "mae": 5.998571404549365,
@@ -752,6 +1049,11 @@
               "shapiro_w": 0.9123666002000858,
               "p_value": 0.4521479734159864,
               "hypothesis_result": 0,
+              "shapiro_w_ci_95": [
+                0.6101132260464355,
+                0.9149601318699994
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 0.2100874026707197,
               "standard_deviation": 0.06540453443710652,
               "mae": 0.2100874026707197,
@@ -762,6 +1064,11 @@
               "shapiro_w": 0.8851958130807462,
               "p_value": 0.29377584125523665,
               "hypothesis_result": 0,
+              "shapiro_w_ci_95": [
+                0.5671251198533463,
+                0.9417059597838073
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 0.17779246557788272,
               "standard_deviation": 0.156991723839066,
               "mae": 0.20105108034776362,
@@ -772,6 +1079,11 @@
               "shapiro_w": 0.835205869264571,
               "p_value": 0.1189116749825182,
               "hypothesis_result": 0,
+              "shapiro_w_ci_95": [
+                0.6072986432736955,
+                0.9107517692497644
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": -0.014544058217850856,
               "standard_deviation": 0.08621459375944553,
               "mae": 0.05862864088634764,
@@ -782,6 +1094,11 @@
               "shapiro_w": 0.9254344530484022,
               "p_value": 0.5453336529123776,
               "hypothesis_result": 0,
+              "shapiro_w_ci_95": [
+                0.576164484469852,
+                0.9487288502387969
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 0.23997861058877634,
               "standard_deviation": 0.5197564699721752,
               "mae": 0.3708113575155163,
@@ -798,6 +1115,11 @@
               "shapiro_w": 0.787405551898807,
               "p_value": 0.001013915794281059,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.6479881235474205,
+                0.8690948480119072
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 0.013631081625035433,
               "standard_deviation": 0.2077059192938582,
               "mae": 0.14843966772852868,
@@ -808,6 +1130,11 @@
               "shapiro_w": 0.9155742473894868,
               "p_value": 0.10792930420662028,
               "hypothesis_result": 0,
+              "shapiro_w_ci_95": [
+                0.8007194969388498,
+                0.9445427558925039
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 0.07276594789036415,
               "standard_deviation": 0.07568875036839179,
               "mae": 0.07935775328246925,
@@ -818,6 +1145,11 @@
               "shapiro_w": 0.7513991412343933,
               "p_value": 0.00033779129388143594,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.6148993710506964,
+                0.9558013961928726
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": -0.06408257399767867,
               "standard_deviation": 0.18987369738935614,
               "mae": 0.12147773209589961,
@@ -828,6 +1160,11 @@
               "shapiro_w": 0.7091523542439288,
               "p_value": 0.00010222440024574733,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.5841409748476047,
+                0.9390899110381034
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 0.008461721797497457,
               "standard_deviation": 0.052556069765585675,
               "mae": 0.028835261179387468,
@@ -836,10 +1173,14 @@
           }
         }
       },
-      "rank": 6
+      "rank": 7
     },
     "BiLSTM-GRU": {
       "average_shapiro_w": 0.8276968399601977,
+      "average_shapiro_w_ci_95": [
+        0.6417398315111436,
+        0.9077782703329511
+      ],
       "average_p_value": 0.13481943065622254,
       "rejected_test_count": 8,
       "normality_test_count": 12,
@@ -854,6 +1195,11 @@
           "shapiro_w": 0.7813414800770062,
           "p_value": 1.9317145132169629e-10,
           "hypothesis_result": 1,
+          "shapiro_w_ci_95": [
+            0.6626765358862108,
+            0.8525763408372994
+          ],
+          "ci_method": "percentile_bootstrap_b1000",
           "mean": -0.39355599293249904,
           "standard_deviation": 11.978383281578216,
           "mae": 6.225966282111793,
@@ -864,6 +1210,11 @@
           "shapiro_w": 0.7284563836947588,
           "p_value": 8.025806980079962e-12,
           "hypothesis_result": 1,
+          "shapiro_w_ci_95": [
+            0.6012199778579548,
+            0.8124984151124881
+          ],
+          "ci_method": "percentile_bootstrap_b1000",
           "mean": -1.3817060427317926,
           "standard_deviation": 17.011945352213328,
           "mae": 8.224375863598905,
@@ -874,6 +1225,11 @@
           "shapiro_w": 0.8062208856961823,
           "p_value": 1.032862640475694e-09,
           "hypothesis_result": 1,
+          "shapiro_w_ci_95": [
+            0.6916866330833863,
+            0.8887278866867452
+          ],
+          "ci_method": "percentile_bootstrap_b1000",
           "mean": 0.7142172101262503,
           "standard_deviation": 9.032226182266172,
           "mae": 4.869196512074887,
@@ -884,6 +1240,11 @@
           "shapiro_w": 0.4692926632245987,
           "p_value": 1.0290859131127695e-16,
           "hypothesis_result": 1,
+          "shapiro_w_ci_95": [
+            0.32150814700129643,
+            0.5806921124645675
+          ],
+          "ci_method": "percentile_bootstrap_b1000",
           "mean": -0.46990084250410236,
           "standard_deviation": 13.668265922533335,
           "mae": 4.479415763464069,
@@ -900,6 +1261,11 @@
               "shapiro_w": 0.8698432262043214,
               "p_value": 3.461767204847557e-06,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.7720048255880716,
+                0.9193772331366193
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": -0.5633354415007755,
               "standard_deviation": 13.928187290978144,
               "mae": 8.339355342904202,
@@ -910,6 +1276,11 @@
               "shapiro_w": 0.8211275832121813,
               "p_value": 1.0694429841238943e-07,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.6988275766031629,
+                0.8940649522665881
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": -1.896561146844887,
               "standard_deviation": 19.7606880984247,
               "mae": 11.034819073632127,
@@ -920,6 +1291,11 @@
               "shapiro_w": 0.8884939251487705,
               "p_value": 1.5914247301061902e-05,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.7831314455996206,
+                0.9521658239277703
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 1.0055530396785952,
               "standard_deviation": 10.488803616139709,
               "mae": 6.493138545533366,
@@ -930,6 +1306,11 @@
               "shapiro_w": 0.5555087744695908,
               "p_value": 3.898244259659473e-13,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.37037343357306507,
+                0.666981920466553
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": -0.6403581011551658,
               "standard_deviation": 15.894734311108266,
               "mae": 6.022812790695796,
@@ -946,6 +1327,11 @@
               "shapiro_w": 0.8320515216787289,
               "p_value": 0.11186927927735807,
               "hypothesis_result": 0,
+              "shapiro_w_ci_95": [
+                0.5879172217145007,
+                0.9161805514675716
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 0.04724803163293775,
               "standard_deviation": 0.10801923522410727,
               "mae": 0.07122870714461738,
@@ -956,6 +1342,11 @@
               "shapiro_w": 0.9211494134786233,
               "p_value": 0.5136777378817768,
               "hypothesis_result": 0,
+              "shapiro_w_ci_95": [
+                0.6398937048230985,
+                0.9440982410677158
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 0.35409217329516834,
               "standard_deviation": 0.438624474432154,
               "mae": 0.46164680667620966,
@@ -966,6 +1357,11 @@
               "shapiro_w": 0.8581179070519929,
               "p_value": 0.18280205459090754,
               "hypothesis_result": 0,
+              "shapiro_w_ci_95": [
+                0.5639510171909121,
+                0.9032930351704646
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": -0.3623745529563893,
               "standard_deviation": 0.30433180992902314,
               "mae": 0.40543284636536625,
@@ -976,6 +1372,11 @@
               "shapiro_w": 0.9556037326779635,
               "p_value": 0.7852996965897604,
               "hypothesis_result": 0,
+              "shapiro_w_ci_95": [
+                0.6398937048230985,
+                0.9691312569644651
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 0.06280823525609351,
               "standard_deviation": 0.10135807195258804,
               "mae": 0.0831101063259629,
@@ -992,6 +1393,11 @@
               "shapiro_w": 0.8552099287223341,
               "p_value": 0.010243527984196747,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.7312771840535153,
+                0.8856272960822943
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 0.11033055172408256,
               "standard_deviation": 0.23144614919730364,
               "mae": 0.1762207407299591,
@@ -1002,6 +1408,11 @@
               "shapiro_w": 0.8594461106819492,
               "p_value": 0.011976861002708568,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.7181572489938757,
+                0.943573108335207
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 0.013305784359413639,
               "standard_deviation": 0.0558287671446813,
               "mae": 0.03858657744577823,
@@ -1012,6 +1423,11 @@
               "shapiro_w": 0.8058612471486799,
               "p_value": 0.001840062664588904,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.6115063552726914,
+                0.9609158834583866
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": -0.043706215463526786,
               "standard_deviation": 0.22070478997775628,
               "mae": 0.1320066057205566,
@@ -1022,6 +1438,11 @@
               "shapiro_w": 0.7099487090472358,
               "p_value": 0.00010446492417895145,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.5839442598981097,
+                0.9379299416517767
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 0.005948956404907985,
               "standard_deviation": 0.0527754002622658,
               "mae": 0.02849571145515464,
@@ -1030,10 +1451,14 @@
           }
         }
       },
-      "rank": 3
+      "rank": 4
     },
     "Transformer": {
       "average_shapiro_w": 0.8250026480769979,
+      "average_shapiro_w_ci_95": [
+        0.642296169219074,
+        0.9058009941135841
+      ],
       "average_p_value": 0.1289702321632459,
       "rejected_test_count": 8,
       "normality_test_count": 12,
@@ -1048,6 +1473,11 @@
           "shapiro_w": 0.7821267459198709,
           "p_value": 2.0326653193815853e-10,
           "hypothesis_result": 1,
+          "shapiro_w_ci_95": [
+            0.6639013856455848,
+            0.8534736690433893
+          ],
+          "ci_method": "percentile_bootstrap_b1000",
           "mean": -0.5647778017899694,
           "standard_deviation": 11.980729103794184,
           "mae": 6.24694677479648,
@@ -1058,6 +1488,11 @@
           "shapiro_w": 0.7277610916335161,
           "p_value": 7.719651161370521e-12,
           "hypothesis_result": 1,
+          "shapiro_w_ci_95": [
+            0.5995431402862371,
+            0.8117445136436138
+          ],
+          "ci_method": "percentile_bootstrap_b1000",
           "mean": -1.3090817053650388,
           "standard_deviation": 17.01259972126638,
           "mae": 8.207518250090017,
@@ -1068,6 +1503,11 @@
           "shapiro_w": 0.806851839681006,
           "p_value": 1.0796480654431654e-09,
           "hypothesis_result": 1,
+          "shapiro_w_ci_95": [
+            0.6928626359379975,
+            0.8897436986844438
+          ],
+          "ci_method": "percentile_bootstrap_b1000",
           "mean": 0.6851358229377345,
           "standard_deviation": 9.03416157547972,
           "mae": 4.8714624482596545,
@@ -1078,6 +1518,11 @@
           "shapiro_w": 0.46934243471087483,
           "p_value": 1.0308653246093153e-16,
           "hypothesis_result": 1,
+          "shapiro_w_ci_95": [
+            0.32110174762129984,
+            0.5807744446815353
+          ],
+          "ci_method": "percentile_bootstrap_b1000",
           "mean": -0.4774804406480748,
           "standard_deviation": 13.673418742588971,
           "mae": 4.483030899919415,
@@ -1094,6 +1539,11 @@
               "shapiro_w": 0.8694709123952844,
               "p_value": 3.3621708833282656e-06,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.7711655886520371,
+                0.9186673848767053
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": -0.7840781876706734,
               "standard_deviation": 13.928188997912837,
               "mae": 8.368999400844476,
@@ -1104,6 +1554,11 @@
               "shapiro_w": 0.8207044537210776,
               "p_value": 1.0403628586531251e-07,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.698131263698346,
+                0.8932832752632702
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": -1.8078652024739839,
               "standard_deviation": 19.763023174602317,
               "mae": 11.00967093379794,
@@ -1114,6 +1569,11 @@
               "shapiro_w": 0.8893714532121572,
               "p_value": 1.7154122882462173e-05,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.784402459860425,
+                0.9527452990088136
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 0.9570773036080945,
               "standard_deviation": 10.493305127442593,
               "mae": 6.503015476532425,
@@ -1124,6 +1584,11 @@
               "shapiro_w": 0.555533226587806,
               "p_value": 3.9016469955285447e-13,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.3704266179690538,
+                0.6667607213658779
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": -0.6511171488393716,
               "standard_deviation": 15.900589932827598,
               "mae": 6.027346920171022,
@@ -1140,6 +1605,11 @@
               "shapiro_w": 0.8144267813567785,
               "p_value": 0.07892688867846004,
               "hypothesis_result": 0,
+              "shapiro_w_ci_95": [
+                0.6293325565744264,
+                0.9139958936017887
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": -0.0009956518051337053,
               "standard_deviation": 0.10613942599254306,
               "mae": 0.0708739209419905,
@@ -1150,6 +1620,11 @@
               "shapiro_w": 0.9313972355111512,
               "p_value": 0.5909345514736362,
               "hypothesis_result": 0,
+              "shapiro_w_ci_95": [
+                0.6398937048230985,
+                0.9469326579347894
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 0.4074921010099713,
               "standard_deviation": 0.44159434446102425,
               "mae": 0.480686592493124,
@@ -1160,6 +1635,11 @@
               "shapiro_w": 0.8599883927182701,
               "p_value": 0.18912627323900033,
               "hypothesis_result": 0,
+              "shapiro_w_ci_95": [
+                0.5701381599636944,
+                0.9022469884345872
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": -0.2546888983138147,
               "standard_deviation": 0.29709515609315357,
               "mae": 0.32960151894863493,
@@ -1170,6 +1650,11 @@
               "shapiro_w": 0.9406764350637755,
               "p_value": 0.6646540642640297,
               "hypothesis_result": 0,
+              "shapiro_w_ci_95": [
+                0.6180387680960635,
+                0.9598769995213258
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 0.06914579171426484,
               "standard_deviation": 0.10679877200927064,
               "mae": 0.08877876380021817,
@@ -1186,6 +1671,11 @@
               "shapiro_w": 0.854006757010213,
               "p_value": 0.009801255154501348,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.729077240004733,
+                0.8842363203871678
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 0.08794629409111737,
               "standard_deviation": 0.23146725416717373,
               "mae": 0.17110265956399223,
@@ -1196,6 +1686,11 @@
               "shapiro_w": 0.8603735765044582,
               "p_value": 0.012396299758928834,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.7147898134902348,
+                0.9363357624119081
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 0.03073043142758091,
               "standard_deviation": 0.05534398099876583,
               "mae": 0.041543515075261085,
@@ -1206,6 +1701,11 @@
               "shapiro_w": 0.8034812845827126,
               "p_value": 0.001701683801469218,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.6081057036606896,
+                0.9603248288877291
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": -0.04403161254812956,
               "standard_deviation": 0.2199172758340058,
               "mae": 0.13112948298437024,
@@ -1216,6 +1716,11 @@
               "shapiro_w": 0.7006012682602905,
               "p_value": 8.114925848389862e-05,
               "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.5740521538360861,
+                0.934205797669046
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
               "mean": 0.005918196631116192,
               "standard_deviation": 0.05256833082900663,
               "mae": 0.02790353432798852,
@@ -1224,7 +1729,285 @@
           }
         }
       },
-      "rank": 5
+      "rank": 6
+    },
+    "GEO Regime-Aware Residual": {
+      "average_shapiro_w": 0.8487329842554474,
+      "average_shapiro_w_ci_95": [
+        0.663166016271533,
+        0.9097525008159866
+      ],
+      "average_p_value": 0.1776961735390594,
+      "rejected_test_count": 7,
+      "normality_test_count": 12,
+      "mean_absolute_bias": 0.5200899626733784,
+      "average_residual_std": 5.167558340845125,
+      "overall_mae_m": 6.2359250296289614,
+      "overall_rmse_m": 13.244571648757605,
+      "pooled_average_shapiro_w": 0.7185449634417225,
+      "pooled_per_target": {
+        "x_error_m": {
+          "count": 93,
+          "shapiro_w": 0.7931604875996513,
+          "p_value": 4.2135085322533226e-10,
+          "hypothesis_result": 1,
+          "shapiro_w_ci_95": [
+            0.6846633163156712,
+            0.8615425349675508
+          ],
+          "ci_method": "percentile_bootstrap_b1000",
+          "mean": 0.2591045784884336,
+          "standard_deviation": 12.007410453796048,
+          "mae": 6.4207235753809435,
+          "rmse": 11.945490401239077
+        },
+        "y_error_m": {
+          "count": 93,
+          "shapiro_w": 0.7326316268505476,
+          "p_value": 1.0151908221145357e-11,
+          "hypothesis_result": 1,
+          "shapiro_w_ci_95": [
+            0.6022849131132281,
+            0.8151038840393489
+          ],
+          "ci_method": "percentile_bootstrap_b1000",
+          "mean": -0.9205187014283192,
+          "standard_deviation": 16.98449266431321,
+          "mae": 8.242814039871678,
+          "rmse": 16.91799295498197
+        },
+        "z_error_m": {
+          "count": 93,
+          "shapiro_w": 0.8283832993011708,
+          "p_value": 5.1963489475094256e-09,
+          "hypothesis_result": 1,
+          "shapiro_w_ci_95": [
+            0.7026883952213653,
+            0.9137689220999369
+          ],
+          "ci_method": "percentile_bootstrap_b1000",
+          "mean": 1.3100840751660061,
+          "standard_deviation": 9.110472129558396,
+          "mae": 5.151268828030454,
+          "rmse": 9.15557436954361
+        },
+        "clock_error_m": {
+          "count": 93,
+          "shapiro_w": 0.5200044400155202,
+          "p_value": 6.388272670384351e-16,
+          "hypothesis_result": 1,
+          "shapiro_w_ci_95": [
+            0.388289294689368,
+            0.6160934760912413
+          ],
+          "ci_method": "percentile_bootstrap_b1000",
+          "mean": -1.1039165917911595,
+          "standard_deviation": 13.775294140037193,
+          "mae": 5.1288936752327725,
+          "rmse": 13.745433570794946
+        }
+      },
+      "per_series": {
+        "GEO": {
+          "rows": 69,
+          "average_shapiro_w": 0.8023032240189314,
+          "per_target": {
+            "x_error_m": {
+              "count": 69,
+              "shapiro_w": 0.8777563692078815,
+              "p_value": 6.51093091873025e-06,
+              "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.7829506822724891,
+                0.9247156398071374
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
+              "mean": 0.27014584116845597,
+              "standard_deviation": 13.965488570269152,
+              "mae": 8.561371545736712,
+              "rmse": 13.866551750467528
+            },
+            "y_error_m": {
+              "count": 69,
+              "shapiro_w": 0.8256733846970621,
+              "p_value": 1.4417261084697243e-07,
+              "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.7076390235105725,
+                0.8958767157023901
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
+              "mean": -1.1936904411247675,
+              "standard_deviation": 19.747750775557588,
+              "mae": 11.041895385145482,
+              "rmse": 19.640436995617073
+            },
+            "z_error_m": {
+              "count": 69,
+              "shapiro_w": 0.9052359108539222,
+              "p_value": 7.048014317121959e-05,
+              "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.785772693682302,
+                0.9645982992290641
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
+              "mean": 1.7334724089721834,
+              "standard_deviation": 10.562341546358528,
+              "mae": 6.877194890805767,
+              "rmse": 10.62784689426342
+            },
+            "clock_error_m": {
+              "count": 69,
+              "shapiro_w": 0.6005472313168596,
+              "p_value": 2.066584948197662e-12,
+              "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.4441524258979828,
+                0.6988446454617762
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
+              "mean": -1.5046629846313715,
+              "standard_deviation": 16.00302469636032,
+              "mae": 6.890154207118759,
+              "rmse": 15.957733620780191
+            }
+          }
+        },
+        "MEO-1": {
+          "rows": 6,
+          "average_shapiro_w": 0.9158786757204421,
+          "per_target": {
+            "x_error_m": {
+              "count": 6,
+              "shapiro_w": 0.940281811874228,
+              "p_value": 0.6614704476426952,
+              "hypothesis_result": 0,
+              "shapiro_w_ci_95": [
+                0.6398937048230985,
+                0.9442218939272276
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
+              "mean": 0.5831643866989716,
+              "standard_deviation": 0.16611571129062344,
+              "mae": 0.5831643866989716,
+              "rmse": 0.6025579307103834
+            },
+            "y_error_m": {
+              "count": 6,
+              "shapiro_w": 0.9291474112278111,
+              "p_value": 0.5735340092760249,
+              "hypothesis_result": 0,
+              "shapiro_w_ci_95": [
+                0.6398937048230986,
+                0.9477207587112889
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
+              "mean": -0.24199914082901675,
+              "standard_deviation": 0.4527048817538623,
+              "mae": 0.38023863531267454,
+              "rmse": 0.4789032704681927
+            },
+            "z_error_m": {
+              "count": 6,
+              "shapiro_w": 0.8790492788567976,
+              "p_value": 0.2647195448112693,
+              "hypothesis_result": 0,
+              "shapiro_w_ci_95": [
+                0.624231007496499,
+                0.8956654586447039
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
+              "mean": 0.3491122617142917,
+              "standard_deviation": 0.3088308762900603,
+              "mae": 0.3491122617142917,
+              "rmse": 0.44873131872462413
+            },
+            "clock_error_m": {
+              "count": 6,
+              "shapiro_w": 0.9150362009229317,
+              "p_value": 0.47034754259339995,
+              "hypothesis_result": 0,
+              "shapiro_w_ci_95": [
+                0.6091669496196014,
+                0.9288908135668835
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
+              "mean": 0.12722042266916825,
+              "standard_deviation": 0.18904141481708323,
+              "mae": 0.15355068455358023,
+              "rmse": 0.21439585593202493
+            }
+          }
+        },
+        "MEO-2": {
+          "rows": 18,
+          "average_shapiro_w": 0.8280170530269694,
+          "per_target": {
+            "x_error_m": {
+              "count": 18,
+              "shapiro_w": 0.8268252341722866,
+              "p_value": 0.003729488033603604,
+              "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.6838987203765703,
+                0.8917851151066446
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
+              "mean": 0.10875980214483555,
+              "standard_deviation": 0.21865488874726946,
+              "mae": 0.16075941857780926,
+              "rmse": 0.23871017160156577
+            },
+            "y_error_m": {
+              "count": 18,
+              "shapiro_w": 0.924077014222357,
+              "p_value": 0.1526487362254041,
+              "hypothesis_result": 0,
+              "shapiro_w_ci_95": [
+                0.7947313754601034,
+                0.9440062642708611
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
+              "mean": -0.09953355279170063,
+              "standard_deviation": 0.11830598652369644,
+              "mae": 0.1338606845084322,
+              "rmse": 0.15207123987879906
+            },
+            "z_error_m": {
+              "count": 18,
+              "shapiro_w": 0.8388642022850632,
+              "p_value": 0.005680361260107384,
+              "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.6593105997071732,
+                0.9514121992497152
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
+              "mean": 0.007419400059563099,
+              "standard_deviation": 0.22298994858417745,
+              "mae": 0.13593777616380512,
+              "rmse": 0.2168342488877864
+            },
+            "clock_error_m": {
+              "count": 18,
+              "shapiro_w": 0.7223017614281706,
+              "p_value": 0.00014681737744035283,
+              "hypothesis_result": 1,
+              "shapiro_w_ci_95": [
+                0.586351307588906,
+                0.9292922061141456
+              ],
+              "ci_method": "percentile_bootstrap_b1000",
+              "mean": 0.021898909276213303,
+              "standard_deviation": 0.05545079358913705,
+              "mae": 0.03584263322955407,
+              "rmse": 0.058168127373773255
+            }
+          }
+        }
+      },
+      "rank": 2
     }
   }
 }
