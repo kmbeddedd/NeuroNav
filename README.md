@@ -1,4 +1,4 @@
-# Gaitonde
+# NeuroNav
 
 ## Simple GNSS BiLSTM
 
