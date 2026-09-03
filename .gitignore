@@ -1,3 +1,42 @@
+# Python environments and caches
 .venv/
+venv/
 __pycache__/
-*.whl
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# Local secrets (keep templates such as .env.example)
+.env
+.env.*
+!.env.example
+
+# Coverage, packaging, and build output
+.coverage
+.coverage.*
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# JavaScript dependencies, if a demo UI is added
+node_modules/
+
+# OS and editor junk
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+
+# Local archives
+*.zip
+*.rar
+
+# Scratch runs; curated benchmark artifacts under results/ remain trackable
+results/local/
+
+# Local agent configuration
+.agents/
+tests/
