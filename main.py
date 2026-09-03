@@ -43,7 +43,10 @@ def main():
         from scripts.model_comparison_window import main as run_comparison
         run_comparison()
     elif args.model == 'gui':
-        from gui_app import main as run_gui
+        try:
+            from gui.gui_app import main as run_gui
+        except ImportError:
+            from gui_app import main as run_gui
         run_gui()
 if __name__ == '__main__':
     main()

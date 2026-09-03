@@ -14,7 +14,10 @@ if str(PROJECT_DIR) not in sys.path:
     sys.path.insert(0, str(PROJECT_DIR))
 os.chdir(PROJECT_DIR)
 
-from gui_app import main
+try:
+    from gui.gui_app import main
+except ImportError:
+    from gui_app import main
 
 if __name__ == "__main__":
     main()
