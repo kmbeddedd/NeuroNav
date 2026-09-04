@@ -33,13 +33,19 @@ class SatelliteSelection:
     satellite_id: str
     selected_model: str
     selection_mode: str = "automatic"  # "automatic" or "manual"
+    selection_policy: str = "official_competition"
     model_version: str = "1.0.0"
     selection_score: float = 0.0
-    primary_metric: str = "3d_vector_mae_m"
+    primary_metric: str = "shapiro_w_avg"
     training_dataset_hash: str = ""
     selected_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     model_artifact: Optional[str] = None
     candidate_scores: Dict[str, float] = field(default_factory=dict)
+    winning_priority_1: Dict[str, Any] = field(default_factory=dict)
+    winning_priority_2: Dict[str, Any] = field(default_factory=dict)
+    winning_priority_3: Dict[str, Any] = field(default_factory=dict)
+    candidate_results: Dict[str, Any] = field(default_factory=dict)
+    supplementary_diagnostics: Dict[str, Any] = field(default_factory=dict)
     feature_config: Dict[str, Any] = field(default_factory=dict)
     lookback_config: Dict[str, Any] = field(default_factory=dict)
     history: List[Dict[str, Any]] = field(default_factory=list)
@@ -53,13 +59,19 @@ class SatelliteSelection:
             satellite_id=data.get("satellite_id", ""),
             selected_model=data.get("selected_model", ""),
             selection_mode=data.get("selection_mode", "automatic"),
+            selection_policy=data.get("selection_policy", "official_competition"),
             model_version=data.get("model_version", "1.0.0"),
             selection_score=float(data.get("selection_score", 0.0)),
-            primary_metric=data.get("primary_metric", "3d_vector_mae_m"),
+            primary_metric=data.get("primary_metric", "shapiro_w_avg"),
             training_dataset_hash=data.get("training_dataset_hash", ""),
             selected_at=data.get("selected_at", datetime.now(timezone.utc).isoformat()),
             model_artifact=data.get("model_artifact"),
             candidate_scores=data.get("candidate_scores", {}),
+            winning_priority_1=data.get("winning_priority_1", {}),
+            winning_priority_2=data.get("winning_priority_2", {}),
+            winning_priority_3=data.get("winning_priority_3", {}),
+            candidate_results=data.get("candidate_results", {}),
+            supplementary_diagnostics=data.get("supplementary_diagnostics", {}),
             feature_config=data.get("feature_config", {}),
             lookback_config=data.get("lookback_config", {}),
             history=data.get("history", []),
@@ -140,7 +152,13 @@ class SatelliteModelRegistry:
         training_dataset_hash: str = "",
         model_version: str = "1.0.0",
         model_artifact: Optional[str] = None,
-        primary_metric: str = "3d_vector_mae_m",
+        primary_metric: str = "shapiro_w_avg",
+        selection_policy: str = "official_competition",
+        winning_priority_1: Optional[Dict[str, Any]] = None,
+        winning_priority_2: Optional[Dict[str, Any]] = None,
+        winning_priority_3: Optional[Dict[str, Any]] = None,
+        candidate_results: Optional[Dict[str, Any]] = None,
+        supplementary_diagnostics: Optional[Dict[str, Any]] = None,
         feature_config: Optional[Dict[str, Any]] = None,
         lookback_config: Optional[Dict[str, Any]] = None,
     ) -> SatelliteSelection:
@@ -166,6 +184,7 @@ class SatelliteModelRegistry:
                 "suggested_winner": winner_model,
                 "suggested_score": score,
                 "candidate_scores": candidate_scores,
+                "selection_policy": selection_policy,
                 "training_dataset_hash": training_dataset_hash,
             }
             existing.history.append(audit_entry)
@@ -181,12 +200,14 @@ class SatelliteModelRegistry:
                 "previous_model": existing.selected_model,
                 "previous_score": existing.selection_score,
                 "previous_mode": existing.selection_mode,
+                "previous_policy": getattr(existing, "selection_policy", "official_competition"),
             })
 
         new_selection = SatelliteSelection(
             satellite_id=satellite_id,
             selected_model=winner_model,
             selection_mode="automatic",
+            selection_policy=selection_policy,
             model_version=model_version,
             selection_score=score,
             primary_metric=primary_metric,
@@ -194,6 +215,11 @@ class SatelliteModelRegistry:
             selected_at=now,
             model_artifact=model_artifact,
             candidate_scores=candidate_scores,
+            winning_priority_1=winning_priority_1 or {},
+            winning_priority_2=winning_priority_2 or {},
+            winning_priority_3=winning_priority_3 or {},
+            candidate_results=candidate_results or {},
+            supplementary_diagnostics=supplementary_diagnostics or {},
             feature_config=feature_config or {},
             lookback_config=lookback_config or {},
             history=history,

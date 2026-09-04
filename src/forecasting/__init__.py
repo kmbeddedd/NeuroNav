@@ -5,8 +5,10 @@ from src.forecasting.api import (
     calibrate_models,
     get_all_satellite_selections,
     get_calibration_report,
+    get_detailed_statistical_results,
     get_model_comparison,
     get_model_metadata,
+    get_qq_data,
     get_satellite_selection,
     predict_with_satellite_models,
     reset_to_automatic,
@@ -16,7 +18,12 @@ from src.forecasting.api import (
 from src.forecasting.base import ForecastModel, ModelMetadata
 from src.forecasting.eligibility import compute_eligibility_matrix
 from src.forecasting.models import MODEL_REGISTRY, create_model, get_available_model_names
-from src.forecasting.pipeline import CalibrationPipeline, compute_metrics_for_residuals
+from src.forecasting.pipeline import (
+    CalibrationPipeline,
+    compare_models_hierarchical,
+    compute_metrics_for_residuals,
+    evaluate_residuals_official_hierarchy,
+)
 from src.forecasting.registry import (
     CorruptedRegistryError,
     RegistryError,
@@ -57,7 +64,11 @@ __all__ = [
     "get_all_satellite_selections",
     "set_satellite_model",
     "reset_to_automatic",
+    "evaluate_residuals_official_hierarchy",
+    "compare_models_hierarchical",
     "get_calibration_report",
     "get_model_comparison",
+    "get_detailed_statistical_results",
+    "get_qq_data",
     "get_model_metadata",
 ]

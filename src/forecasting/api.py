@@ -38,19 +38,26 @@ def validate_dataset(
 def calibrate_models(
     train_data: Union[str, Path, pd.DataFrame, Dict[str, pd.DataFrame]],
     test_data: Union[str, Path, pd.DataFrame, Dict[str, pd.DataFrame]],
-    primary_metric: str = "orbit_3d_vector_mae_m",
+    primary_metric: str = "shapiro_w_avg",
+    selection_policy: str = "official_competition",
     candidate_models: Optional[List[str]] = None,
+    alpha: float = 0.05,
+    tie_tolerance: float = 1e-4,
     run_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Phase A Calibration:
 
-    Trains/evaluates candidate models across all satellites, selects the best model per satellite,
-    persists selections to the registry, and saves auditable reports.
+    Trains/evaluates candidate models across all satellites using the Official Competition Hierarchy:
+    Priority 1 (Shapiro-Wilk W_avg) -> Priority 2 (Residual Mean & Std) -> Priority 3 (Q-Q Outliers).
+    Persists winners to the registry and emits comprehensive machine-readable reports.
     """
     pipeline = CalibrationPipeline(
         registry=_default_registry,
         primary_metric=primary_metric,
+        selection_policy=selection_policy,
         candidate_models=candidate_models,
+        alpha=alpha,
+        tie_tolerance=tie_tolerance,
     )
     return pipeline.run_calibration(train_data, test_data, run_id=run_id)
 
@@ -139,18 +146,25 @@ def get_calibration_report(
     reports_base_dir: Union[str, Path] = "reports/calibration",
 ) -> Optional[Dict[str, Any]]:
     """Retrieves a previously generated calibration report summary."""
-    base = Path(reports_base_dir)
+def _resolve_target_dir(base: Path, report_id: Optional[str] = None) -> Optional[Path]:
+    """Resolves target directory, picking the most recently modified if report_id is None."""
     if not base.exists():
         return None
-
     if report_id:
-        target_dir = base / report_id
-    else:
-        # Find latest report
-        subdirs = sorted([d for d in base.iterdir() if d.is_dir()], reverse=True)
-        if not subdirs:
-            return None
-        target_dir = subdirs[0]
+        target = base / report_id
+        return target if target.exists() else None
+    subdirs = sorted([d for d in base.iterdir() if d.is_dir()], key=lambda d: d.stat().st_mtime, reverse=True)
+    return subdirs[0] if subdirs else None
+
+
+def get_calibration_summary(
+    report_id: Optional[str] = None,
+    reports_base_dir: Union[str, Path] = "reports/calibration",
+) -> Optional[Dict[str, Any]]:
+    """Loads calibration summary JSON."""
+    target_dir = _resolve_target_dir(Path(reports_base_dir), report_id)
+    if not target_dir:
+        return None
 
     summary_file = target_dir / "summary.json"
     if not summary_file.exists():
@@ -164,20 +178,49 @@ def get_model_comparison(
     reports_base_dir: Union[str, Path] = "reports/calibration",
 ) -> Optional[pd.DataFrame]:
     """Loads satellite-model comparison metrics as a pandas DataFrame."""
-    base = Path(reports_base_dir)
-    if not base.exists():
+    target_dir = _resolve_target_dir(Path(reports_base_dir), report_id)
+    if not target_dir:
         return None
 
-    if report_id:
-        target_dir = base / report_id
-    else:
-        subdirs = sorted([d for d in base.iterdir() if d.is_dir()], reverse=True)
-        if not subdirs:
-            return None
-        target_dir = subdirs[0]
+    for filename in ("model_comparison.csv", "satellite_model_comparison.csv"):
+        comp_file = target_dir / filename
+        if comp_file.exists():
+            return pd.read_csv(comp_file)
 
-    comp_file = target_dir / "satellite_model_comparison.csv"
-    if not comp_file.exists():
+    return None
+
+
+def get_detailed_statistical_results(
+    report_id: Optional[str] = None,
+    reports_base_dir: Union[str, Path] = "reports/calibration",
+) -> Optional[pd.DataFrame]:
+    """Loads granular per-target statistical metrics (W, p-value, H0, mean, std) as a DataFrame."""
+    target_dir = _resolve_target_dir(Path(reports_base_dir), report_id)
+    if not target_dir:
         return None
 
-    return pd.read_csv(comp_file)
+    for filename in ("detailed_statistical_results.csv", "detailed_metrics.csv"):
+        det_file = target_dir / filename
+        if det_file.exists():
+            return pd.read_csv(det_file)
+
+    return None
+
+
+def get_qq_data(
+    satellite_id: str,
+    model_name: str,
+    report_id: Optional[str] = None,
+    reports_base_dir: Union[str, Path] = "reports/calibration",
+) -> Optional[Dict[str, Any]]:
+    """Loads machine-readable Q-Q plot quantiles and outlier analysis for a satellite and model."""
+    target_dir = _resolve_target_dir(Path(reports_base_dir), report_id)
+    if not target_dir:
+        return None
+
+    qq_file = target_dir / "qq_data" / f"{satellite_id}_{model_name}_qq.json"
+    if not qq_file.exists():
+        return None
+
+    return json.loads(qq_file.read_text(encoding="utf-8"))
+

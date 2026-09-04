@@ -251,9 +251,11 @@ class GEOGatedMoEModel(ForecastModel):
         regime_tensor = torch.as_tensor(np.asarray(regimes), dtype=torch.float32, device=self.device)
 
         # 5. Initialize and train network
+        self.history_dim = int(hist_tensor.shape[-1])
+        self.query_dim = int(query_tensor.shape[-1])
         self.network = GEOGatedMoENetwork(
-            history_dim=hist_tensor.shape[-1],
-            query_dim=query_tensor.shape[-1],
+            history_dim=self.history_dim,
+            query_dim=self.query_dim,
             hidden_dim=self.hidden_dim,
         ).to(self.device)
 
@@ -348,10 +350,19 @@ class GEOGatedMoEModel(ForecastModel):
     def load(cls, path: Union[str, Path]) -> "GEOGatedMoEModel":
         p = Path(path)
         payload = torch.load(p, map_location="cpu", weights_only=False)
+        state_dict = payload.get("network_state_dict")
+        h_dim = payload.get("history_dim")
+        q_dim = payload.get("query_dim")
+        if state_dict:
+            if "gru.weight_ih_l0" in state_dict:
+                h_dim = int(state_dict["gru.weight_ih_l0"].shape[1])
+            if "query_proj.0.weight" in state_dict:
+                q_dim = int(state_dict["query_proj.0.weight"].shape[1])
+
         model = cls(
             name=payload.get("name", "GEO Gated MoE"),
-            history_dim=payload.get("history_dim", 16),
-            query_dim=payload.get("query_dim", 13),
+            history_dim=h_dim if h_dim is not None else 17,
+            query_dim=q_dim if q_dim is not None else 12,
             hidden_dim=payload.get("hidden_dim", 24),
             version=payload.get("version", "1.0.0"),
         )
