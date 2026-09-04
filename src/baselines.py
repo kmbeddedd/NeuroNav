@@ -125,7 +125,7 @@ def generate_baseline_forecasts(history: np.ndarray, horizon: int, baselines: Se
     return {name: generators[name]() for name in requested}
 
 def evaluate_baselines(history: np.ndarray, actual: np.ndarray, target_cols: Sequence[str], baselines: Sequence[str]=DEFAULT_BASELINE_NAMES, season_length: int=96, horizons: Optional[Mapping[str, int]]=None, satellite_ids: Optional[Sequence[Any]]=None, constellations: Optional[Sequence[Any]]=None, valid_mask: Optional[np.ndarray]=None) -> Dict[str, Dict[str, Any]]:
-    from src.evaluate import evaluate_forecasts
+    from src.evaluation import evaluate_forecasts
     actual_values = np.asarray(actual, dtype=np.float64)
     if actual_values.ndim not in (1, 2, 3):
         raise ValueError('actual has an unsupported shape')
