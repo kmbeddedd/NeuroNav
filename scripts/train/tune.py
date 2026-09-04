@@ -3,7 +3,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import numpy as np
 import optuna
 import torch
@@ -25,7 +25,7 @@ def _masked_mae(prediction: torch.Tensor, actual: torch.Tensor, mask: torch.Tens
 
 def parse_args(argv: list[str] | None=None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Tune the masked GNSS BiLSTM benchmark')
-    parser.add_argument('--data', default=DEFAULT_DATA_PATH)
+    parser.add_argument('--data', required=DEFAULT_DATA_PATH is None, default=DEFAULT_DATA_PATH)
     parser.add_argument('--n-trials', '--trials', dest='n_trials', type=int, default=8)
     parser.add_argument('--epochs', type=int, default=12)
     parser.add_argument('--backend', choices=('auto', 'torch', 'keras'), default='auto')

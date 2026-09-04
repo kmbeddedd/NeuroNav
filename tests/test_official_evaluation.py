@@ -48,10 +48,10 @@ from src.forecasting.pipeline import (
     CalibrationPipeline,
     compare_models_hierarchical,
     evaluate_residuals_official_hierarchy,
+    rank_candidates_hierarchically,
 )
 from src.forecasting.registry import SatelliteModelRegistry
 from src.forecasting.router import ModelArtifactError, NoModelSelectionError, PredictionRouter
-
 
 @pytest.fixture
 def synthetic_pair_data():
@@ -367,3 +367,45 @@ def test_operational_routing_and_zero_fallback(tmp_path: Path, synthetic_pair_da
     fresh_router = PredictionRouter(registry=registry, artifacts_dir=tmp_path / "artifacts")
     with pytest.raises(ModelArtifactError):
         fresh_router.predict(train_df[train_df["satellite_id"] == "SAT-A"])
+
+
+# ---------------------------------------------------------------------------
+# Section 11: Tie Tolerance and Candidate Ranking Verification
+# ---------------------------------------------------------------------------
+def test_section11_tie_tolerance_and_hierarchical_ranking():
+    """Verifies that tie_tolerance (tau=1e-4) correctly triggers Priority 2 / 3 and rank_candidates_hierarchically."""
+    # Model A: W_avg = 0.95004, bias = 0.50
+    # Model B: W_avg = 0.95001 (diff = 0.00003 < 1e-4 -> tied in P1), bias = 0.05 (Model B wins on P2!)
+    m_a = {
+        "eligible": True,
+        "priority_1": {"W": {"average": 0.95004}},
+        "priority_2": {"mean": {"aggregate": 0.50}, "std": {"aggregate": 0.50}},
+        "priority_3": {"total_outliers": 5, "aggregate_max_discrepancy": 1.0},
+    }
+    m_b = {
+        "eligible": True,
+        "priority_1": {"W": {"average": 0.95001}},
+        "priority_2": {"mean": {"aggregate": 0.05}, "std": {"aggregate": 0.50}},
+        "priority_3": {"total_outliers": 5, "aggregate_max_discrepancy": 1.0},
+    }
+    # With tie_tolerance=1e-4, Model B wins because P1 difference is 3e-5 (within tolerance)
+    code, reason = compare_models_hierarchical(m_a, m_b, tie_tolerance=1e-4)
+    assert code == -1  # m_b wins
+    assert "Priority 2" in reason and "residual bias" in reason
+
+    # But with strict tie_tolerance=1e-6, Model A wins because 0.95004 > 0.95001
+    code_strict, reason_strict = compare_models_hierarchical(m_a, m_b, tie_tolerance=1e-6)
+    assert code_strict == 1  # m_a wins
+    assert "Priority 1" in reason_strict
+
+    # Test candidate ranking with 3 models:
+    # m_c has much higher W (0.98), should rank 1st.
+    m_c = {
+        "eligible": True,
+        "priority_1": {"W": {"average": 0.98000}},
+        "priority_2": {"mean": {"aggregate": 1.0}, "std": {"aggregate": 1.0}},
+        "priority_3": {"total_outliers": 10, "aggregate_max_discrepancy": 5.0},
+    }
+    candidates = {"model_a": m_a, "model_b": m_b, "model_c": m_c}
+    ranked = rank_candidates_hierarchically(candidates, tie_tolerance=1e-4)
+    assert ranked == ["model_c", "model_b", "model_a"]

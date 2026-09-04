@@ -16,17 +16,15 @@ from typing import Any, Dict, List, Optional, Union
 import pandas as pd
 
 from src.forecasting.models import MODEL_REGISTRY, create_model, get_available_model_names
-from src.forecasting.pipeline import (
-    CalibrationPipeline,
-    evaluate_residuals_official_hierarchy,
-)
-from src.forecasting.registry import (
+from src.forecasting.evaluation.official import evaluate_residuals_official_hierarchy
+from src.forecasting.training.calibration import CalibrationPipeline
+from src.forecasting.registry.store import (
     SatelliteModelRegistry,
     SatelliteSelection,
     get_satellite_artifact_dir,
 )
-from src.forecasting.router import PredictionRouter
-from src.forecasting.validation import (
+from src.forecasting.inference.router import PredictionRouter
+from src.forecasting.data.validation import (
     SatelliteDataset,
     infer_orbit_type,
     load_telemetry_source,
@@ -142,15 +140,18 @@ def train_satellite(
     test_dataset: Union[SatelliteDataset, str, Path, pd.DataFrame],
     satellite_id: Optional[str] = None,
     orbit_type: Optional[str] = None,
-    use_ric: bool = False,
-    use_srp: bool = False,
+    physics_mode: str = "nominal",
+    state_df: Optional[pd.DataFrame] = None,
+    use_ric: Optional[bool] = None,
+    use_srp: Optional[bool] = None,
     target_cadence_minutes: Optional[float] = None,
     candidate_models: Optional[List[str]] = None,
     run_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Trains and selects the winning model for an independently uploaded single-satellite dataset.
 
-    Evaluates candidate models using the Official Competition Hierarchy and registers the winner.
+    Evaluates candidate models using the Official Competition Hierarchy with tie tolerance
+    and registers the winner atomically.
     """
     if not isinstance(dataset, SatelliteDataset):
         ds_train = run_satellite_validation(
@@ -175,6 +176,8 @@ def train_satellite(
     return _default_pipeline.train_single_satellite(
         dataset=ds_train,
         test_data=ds_test,
+        physics_mode=physics_mode,
+        state_df=state_df,
         use_ric=use_ric,
         use_srp=use_srp,
         target_cadence_minutes=target_cadence_minutes,
@@ -252,12 +255,22 @@ def get_satellite_model(satellite_id: str) -> Optional[Dict[str, Any]]:
         "model_version": selection.model_version,
         "model_artifact": selection.model_artifact,
         "selection_score": selection.selection_score,
+        "physics_mode": getattr(selection, "physics_mode", "nominal"),
+        "orbital_state_source": getattr(selection, "orbit_state_source", "nominal_approximation"),
+        "state_artifact": getattr(selection, "state_artifact", None),
         "orbit_type": getattr(selection, "orbit_type", "UNKNOWN"),
         "use_ric": getattr(selection, "use_ric", False),
         "use_srp": getattr(selection, "use_srp", False),
         "cadence_minutes": getattr(selection, "cadence_minutes", 15.0),
+        "cadence_classification": getattr(selection, "cadence_classification", "regular"),
+        "training_duration_seconds": getattr(selection, "training_duration_seconds", 0.0),
         "feature_manifest": getattr(selection, "feature_manifest", {}),
     }
+
+
+def get_satellite_summary(satellite_id: str) -> Optional[Dict[str, Any]]:
+    """Retrieves a comprehensive configuration and provenance summary for a satellite (frontend ready)."""
+    return _default_registry.get_satellite_summary(satellite_id)
 
 
 def get_satellite_metadata(satellite_id: str) -> Optional[Dict[str, Any]]:

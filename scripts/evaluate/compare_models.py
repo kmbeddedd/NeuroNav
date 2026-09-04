@@ -6,7 +6,7 @@ import sys
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, ttk
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 DEFAULT_REPORT = Path('results/ps08_day8/benchmark_report.json')
 
 def load_report(path: Path) -> dict:
@@ -81,11 +81,11 @@ class ComparisonWindow(tk.Tk):
             return
         open_path(path)
 
-def main() -> None:
+def main(argv=None) -> None:
     parser = argparse.ArgumentParser(description='Open the PS-08 model comparison window')
     parser.add_argument('--report', type=Path, default=DEFAULT_REPORT)
     parser.add_argument('--check', action='store_true', help='Validate the report without opening a GUI')
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     report = load_report(args.report)
     if args.check:
         print(f"Report OK. Winner: {report['winner']}. Models: {len(report['ranking'])}")

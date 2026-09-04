@@ -14,7 +14,7 @@ from src.forecasting.base import ForecastModel, ModelMetadata
 class PersistenceModel(ForecastModel):
     """Extrapolates the last known valid observation forward across the forecast horizon."""
 
-    def __init__(self, name: str = "Persistence", version: str = "1.0.0"):
+    def __init__(self, name: str = "Persistence", version: str = "1.0.0", **kwargs):
         super().__init__(name=name, model_type="persistence", version=version)
         self.last_state: Optional[np.ndarray] = None
         self.target_cols = ["x_error_m", "y_error_m", "z_error_m", "clock_error_m"]

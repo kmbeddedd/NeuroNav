@@ -10,19 +10,67 @@
 
 ### Latest instruction
 
-On 2026-09-04, the user instructed that the physics layer be made genuinely functional in the forecasting pipeline:
-1. Integrated Solar Radiation Pressure (SRP) features (`sun_beta_angle`, `shadow_factor`, `solar_cos_angle`) directly into model feature pipelines (`RandomForestModel(enable_srp=True)` and `RandomForestSRPModel`), guaranteeing strict training/inference parity and zero target error leakage.
-2. Implemented `OrbitalStateProvider` abstraction with `NominalStateProvider` explicitly labeled as `orbit_state_source = "nominal_approximation"` to honestly reflect dataset limitations (CSVs contain only error residuals without position/velocity coordinates).
-3. Corrected GEO physical consistency in ECEF (stationary at nominal longitude with prograde along-track velocity) and documented MEO nominal Keplerian geometry.
-4. Fixed ablation experiment E5 so SRP features genuinely reach model input and produce measurable comparison against baseline E0.
-5. Added `tests/test_physics_integration.py` with 12 comprehensive tests covering orthonormality, round-trip, physical bounds, feature matrix expansion, leakage prevention, and model persistence.
+On 2026-09-04, the user approved the complete Phase 1 structural audit and requested
+execution of all approved refactoring plus the README update. The implementation:
+
+1. Established `src.forecasting` as the production API and exported all required
+   single-satellite functions from the package facade.
+2. Split production responsibilities into `data/`, `features/`, `evaluation/`,
+   `training/`, `registry/`, and `inference/` modules while preserving old import paths.
+3. Isolated the inherited global pipeline under `src/compat/global_forecasting/`; the
+   unchanged Tkinter frontend continues to use compatibility imports.
+4. Consolidated the supplied CSVs under `data/ps08/` and competition references under
+   `docs/reference/ps08/`; removed exact duplicates from `research/ps08/data/`.
+5. Moved benchmark, OrbitIQ, ablation, operational evaluation, research tests, and
+   lineage tooling into purpose-specific locations with compatibility CLI wrappers.
+6. Corrected registry artifact paths from the nonexistent `artifacts_test` directory to
+   `models/registry/artifacts/` without changing selected models.
+7. Added explicit PS-08 input and satellite prediction contracts, Git LFS attributes for
+   model binaries, and a production-oriented README.
+8. Verification passed: 133 tests, public/compatibility import smoke tests, and routed
+   two-step forecasts for GEO, MEO-1, and MEO-2.
+
+### Previous instruction (N-HiTS Day-8 exports)
+
+On 2026-09-04, the user instructed to generate predicted 8th day values in the form of CSV files for datasets MEO train (`DATA_MEO_Train.csv`), MEO Train2 (`DATA_MEO_Train2.csv`), and GEO (`DATA_GEO_Train.csv`) using `nhits`:
+1. Generated production exports in root directory and `results/nhits_day8_predictions/`:
+   - `predictions_GEO_nhits.csv` (69 rows matching `DATA_GEO_Test.csv` with predictions, actuals, residuals, 3D orbit error)
+   - `predictions_MEO_train_nhits.csv` (11 rows matching `DATA_MEO_Test.csv` row-by-row)
+   - `predictions_MEO_Train2_nhits.csv` (30 rows matching `DATA_MEO_Test2.csv` row-by-row)
+   - Submission-format clean 5-column CSVs: `DATA_GEO_Test_nhits_predicted.csv`, `DATA_MEO_Test_nhits_predicted.csv`, `DATA_MEO_Train2_Test_nhits_predicted.csv`
+   - Deduplicated unique-epoch CSVs: `predictions_GEO_nhits_unique_epochs.csv` (69 rows), `predictions_MEO_train_nhits_unique_epochs.csv` (6 rows), `predictions_MEO_Train2_nhits_unique_epochs.csv` (18 rows)
+   - Combined multi-satellite evaluation CSV: `all_satellites_nhits_day8_predictions.csv` (110 rows)
+2. Verified evaluation metrics under the Official Competition Hierarchy:
+   - **GEO (`GEO_nhits.pt`):** $W_{\text{avg}} = 0.889359$, 3D MAE = 23.5272 m, Clock MAE = 7.7601 m
+   - **MEO train / MEO-1 (`MEO-1_nhits.pt`):** $W_{\text{avg}} = 0.942893$, 3D MAE = 1.0734 m, Clock MAE = 0.2201 m
+   - **MEO Train2 / MEO-2 (`MEO-2_nhits.pt`):** $W_{\text{avg}} = 0.839277$, 3D MAE = 0.3406 m, Clock MAE = 0.0288 m
+3. Persisted trained model checkpoints in `models/registry/artifacts/`: `GEO_nhits.pt`, `MEO-1_nhits.pt`, `MEO-2_nhits.pt`.
+4. Automated generator: `scripts/evaluate/export_nhits_day8_predictions.py`.
+5. Automated tests: Added `tests/test_nhits_predictions.py` (2 passed). Full test suite passes 100% (133/133 passed).
+
+### Previous instruction (2026-09-04)
+
+The satellite forecasting architecture was fully finished and integrated for single-satellite independent datasets and physics semantics:
+1. Implemented single-satellite independent upload, validation, and training workflow (`train_satellite`, `train_single_satellite`, `run_satellite_validation`) primarily supporting real-world input without orbital state vectors (UTC + error measurements only).
+2. Explicit `physics_mode` semantics implemented across features, models, registry, pipeline, router, and API:
+   - `"none"`: Disables all RIC and SRP physics context completely; model trains on temporal and error features only.
+   - `"nominal"`: Uses nominal solar radiation pressure / orbit approximation without requiring external coordinates.
+   - `"provided"`: Accepts user-supplied ephemeris / orbit-state table (`state_df`), interpolates state vectors, persists `orbital_state.csv` into `models/registry/artifacts/satellites/<sat_id>/`, records `state_artifact` in the registry, and reloads it on operational inference.
+3. Feature engineering parity in `src/forecasting/features.py`: Added instantaneous unit basis projections ($\hat{r}_z, \hat{i}_z, \hat{c}_z$) and `dt_seconds` time-gap features with zero target error leakage across training and inference.
+4. Cadence classification in `SamplingMetadata`: Added `mean_cadence_minutes`, `cadence_std_minutes`, `duration_hours`, and `cadence_classification` (`"regular" | "mildly_irregular" | "strongly_irregular"`). Default `resample_if_irregular=False`.
+5. Model Eligibility and Capabilities: Added `ModelCapabilities` with `supports_irregular_timestamps`, `requires_regular_cadence`, `supports_nominal_physics`, and `supports_provided_state`.
+6. Official Competition Hierarchy candidate ranking: Implemented `rank_candidates_hierarchically` with `functools.cmp_to_key` and tie tolerance ($\tau = 10^{-4}$), strictly respecting Priority 1 ($W_{\text{avg}}$), Priority 2 (aggregate bias and std), and Priority 3 (Q-Q Blom outliers).
+7. Strict fail-closed routing in `router.py`: Verifies explicitly recorded `selection.model_artifact` directly and raises `ModelArtifactError` immediately if missing, preventing silent fallbacks to leftover sibling files.
+8. Enhanced `PersistenceModel.__init__` with `**kwargs` for clean parameter propagation from model factory.
+9. Added `get_satellite_summary(satellite_id)` for frontend-ready provenance and configuration.
+10. Added comprehensive regression tests in `tests/test_official_evaluation.py` (10 passed) and `tests/test_satellite_upload_pipeline.py` (12 passed). Full test suite passes 100% (131/131 passed).
 
 ### Governing model-selection instruction
 
 Model selection must be driven strictly by the **official competition evaluation hierarchy**:
 1. **Priority 1 (Primary Decision):** Shapiro-Wilk $W_{\text{avg}} = (W_X + W_Y + W_Z + W_{\text{Clock}}) / 4$ with exactly equal weight (25%) per parameter at significance level $\alpha = 0.05$. Higher $W_{\text{avg}}$ wins. Retains per-parameter $W$, $p$-values, hypothesis results $H_0 \in \{0, 1\}$ ($0 = \text{fail to reject normality}, 1 = \text{reject normality}$), and sample size $N$.
 2. **Priority 2 (First Tie-Breaker):** Invoked strictly when Priority 1 is tied within tolerance $\tau = 10^{-4}$. Compares equal-weighted aggregate residual bias $|\mu| = \frac{1}{4} \sum_p |\mu_p|$ and aggregate standard deviation $\sigma = \frac{1}{4} \sum_p \sigma_p$. Lower aggregate error wins.
-3. **Priority 3 (Second Tie-Breaker):** Invoked strictly when Priority 1 and Priority 2 remain tied. Compares Q-Q plot outlier counts ($|z| > 3.0$ or $|\Delta_i| > 1.0$) and maximum quantile discrepancy. Fewer outliers wins.
+3. **Priority 3 (Second Tie-Breaker):** Invoked strictly when Priority 1 and Priority 2 remain tied within tolerance. Compares Q-Q plot outlier counts ($|z| > 3.0$ or $|\Delta_i| > 1.0$) and maximum quantile discrepancy. Fewer outliers wins.
 4. **Supplementary Metrics (Diagnostics Only):** MAE, RMSE, 3D Orbit Error, and SISRE are computed strictly as supplementary diagnostics and **never** drive the official selection decision.
 
 The backend was also required to support a satellite-specific calibration and operational inference router with persistent atomic registry updates and **zero silent fallback to BiLSTM**. Frontend/GUI modifications were strictly forbidden.
@@ -149,20 +197,27 @@ Verdict: **Resolved and Modularized**. The previously identified architectural g
 
 ## Backend Verification Status
 
-- Automated test suite: **All 80 tests pass cleanly in ~29 seconds**.
-  - `tests/test_satellite_upload_pipeline.py` (9 tests): Covers single-satellite CSV upload, header normalization, filename fallback, cadence validation, `ProvidedStateProvider` interpolation, RIC/SRP feature dimension parity, official hierarchy winner selection, and end-to-end public API workflow.
+- Automated test suite: **All 131 tests pass cleanly in ~30 seconds**.
+  - `tests/test_satellite_upload_pipeline.py` (12 tests): Covers single-satellite CSV upload, header normalization, filename fallback, cadence validation, `ProvidedStateProvider` interpolation, RIC/SRP feature dimension parity, official hierarchy winner selection, end-to-end public API workflow, and `physics_mode` (`"none"`, `"nominal"`, `"provided"`, error guards).
+  - `tests/test_official_evaluation.py` (10 tests): Covers equal 25% target weighting, Priority 1 dominance, Priority 2/3 tie-breakers, Q-Q Blom quantiles, Section 11 tie tolerance ($\tau = 10^{-4}$), input validation ($N \ge 3$), and fail-closed zero-fallback routing.
   - `tests/test_physics_integration.py` (12 tests): Covers dynamic cadence calculation, RIC coordinate conversion, SRP shadow factor, causal window construction, and model training with physics features.
-  - `tests/test_physics.py` (3 tests): Covers nominal orbit state provider, coordinate transformations, and solar radiation geometry.
-  - `tests/test_official_evaluation.py` (9 tests): Covers equal 25% target weighting, Priority 1 dominance, Priority 2/3 tie-breakers, Q-Q Blom quantiles, input validation ($N \ge 3$), and fail-closed zero-fallback routing.
   - `tests/test_satellite_backend.py` (16 tests): Covers RIC rotation, SISRE calculation, SRP shadow factor, atomic registry persistence, manual overrides, corrupt registry recovery, decoupled clock, and N-HiTS.
   - `tests/test_geo_regime_aware.py` (20 tests): Covers causal temporal history, residual reconstruction, Gated MoE gradient flow, and backtest invariance.
+  - `tests/test_evaluate.py` (14 tests): Covers official evaluation metrics and comparisons.
+  - `tests/test_model_integrity.py` (11 tests): Covers parameter serialization and reproducibility.
+  - `tests/test_data_pipeline.py` (9 tests): Covers normalization, dataset schemas, and splits.
+  - `tests/test_inference.py` (8 tests): Covers neural and linear inference contracts, uncertainty quantification, and input validation.
+  - `tests/test_baselines.py` (7 tests): Covers persistence, harmonic ridge, random forest baselines.
+  - `tests/test_orbitiq_eval.py` (4 tests): Covers OrbitIQ regression benchmarking.
+  - `tests/test_physics.py` (3 tests): Covers nominal orbit state provider, coordinate transformations, and solar radiation geometry.
   - `tests/test_ps08_benchmark.py` (3 tests): Covers dataset normalization, deduplication, and orbit specialist routing.
-  - `tests/test_inference.py` (8 tests): Covers BiLSTM and Transformer inference contracts, uncertainty quantification, and input validation.
+  - `tests/test_calibration.py` (1 test): Covers calibration pipeline lifecycle.
+  - `tests/test_data_audit.py` (1 test): Covers source-agnostic CSV validation.
 
 Run the test suite with:
 ```powershell
 $env:PYTHONPATH="."
-.\.venv\Scripts\python.exe -m pytest tests/test_satellite_upload_pipeline.py tests/test_physics_integration.py tests/test_physics.py tests/test_official_evaluation.py tests/test_satellite_backend.py tests/test_geo_regime_aware.py tests/test_ps08_benchmark.py tests/test_inference.py -v
+.\.venv\Scripts\python.exe -m pytest -v
 ```
 
 ## Single-Satellite Dataset & Physics Architecture (2026-09-04)
@@ -206,4 +261,3 @@ $env:PYTHONPATH="."
 - Atomic registry updates use write-and-replace (`os.replace`) to prevent corruption.
 - In manual mode (`selection_mode="manual"`), model assignments are pinned and protected from automated calibration overwrite until explicitly reset to automatic mode.
 - Fail-closed router policy: if a model artifact is missing or an unknown satellite is requested, raise explicit exceptions (`NoModelSelectionError`, `ModelArtifactError`) with zero silent fallbacks.
-

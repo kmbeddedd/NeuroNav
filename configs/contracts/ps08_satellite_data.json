@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "description": "Satellite-specific PS-08 calibration and forecasting input contract",
+  "entity": {
+    "grain": "one observation for one uploaded satellite at one UTC epoch",
+    "satellite_id": "provided by the caller, a satellite_id column, or a recognized file name",
+    "orbit_types": ["GEO", "MEO", "LEO", "UNKNOWN"]
+  },
+  "time": {
+    "canonical_column": "utc_time",
+    "aliases": ["Timestamp", "timestamp", "time"],
+    "default_cadence_minutes": 15,
+    "duplicate_policy": "warn and retain the first row at each duplicate epoch",
+    "default_resampling": false
+  },
+  "required_targets": {
+    "x_error_m": {"aliases": ["x_error (m)", "Error_X"], "unit": "metre"},
+    "y_error_m": {"aliases": ["y_error (m)", "Error_Y"], "unit": "metre"},
+    "z_error_m": {"aliases": ["z_error (m)", "Error_Z"], "unit": "metre"},
+    "clock_error_m": {"aliases": ["satclockerror (m)", "clock_error (m)"], "unit": "metre"}
+  },
+  "split_policy": {
+    "calibration_history": "training CSV only",
+    "selection_labels": "held-out test CSV only",
+    "future_target_features_allowed": false
+  },
+  "physics_modes": {
+    "none": "no orbital-state-derived features",
+    "nominal": "documented approximate orbital state",
+    "provided": "caller-supplied position and optional velocity state"
+  }
+}

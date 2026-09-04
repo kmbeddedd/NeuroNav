@@ -3,13 +3,13 @@ import argparse
 import json
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import numpy as np
 import pandas as pd
 from src.artifacts import sha256_file, write_json
 from src.config import DEFAULT_DATA_PATH
 
-def audit_csv(data_path: str, contract_path: str='configs/data_contract.json') -> dict:
+def audit_csv(data_path: str, contract_path: str='configs/contracts/global_training_data.json') -> dict:
     with open(contract_path, encoding='utf-8') as handle:
         contract = json.load(handle)
     frame = pd.read_csv(data_path)
@@ -49,16 +49,16 @@ def audit_csv(data_path: str, contract_path: str='configs/data_contract.json') -
         critical_failures.append('synchronous kilometre-scale orbit residuals indicate an upstream epoch/alignment defect')
     return {'data_path': str(Path(data_path).resolve()), 'sha256': sha256_file(data_path), 'rows': int(len(frame)), 'satellites': int(frame['Satellite_ID'].nunique()), 'start': frame['Timestamp'].min(), 'end': frame['Timestamp'].max(), 'invalid_timestamps': invalid_timestamps, 'duplicate_satellite_timestamps': duplicate_keys, 'non_finite_required_values': non_finite, 'non_cadence_intervals': non_cadence_intervals, 'norm_identity_max_abs_error_m': norm_identity_max_abs_error_m, 'orbit_error_at_least_1km_fraction': kilometre_fraction, 'synchronous_95pct_1km_epochs': synchronous_km_epochs, 'mean_event_indicator_lag5_correlation': float(np.mean(lag5_correlations)) if lag5_correlations else None, 'critical_failures': critical_failures, 'passed': not critical_failures, 'policy': {'non_finite_values_must_be_rejected': True, 'target_magnitude_rows_must_not_be_deleted': True, 'orbit_alignment_must_be_rebuilt_before_scientific_promotion': bool(kilometre_fraction > 0.01 and synchronous_km_epochs)}}
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv=None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Audit a GNSS CSV against its data contract')
-    parser.add_argument('--data', default=DEFAULT_DATA_PATH)
-    parser.add_argument('--contract', default='configs/data_contract.json')
+    parser.add_argument('--data', required=DEFAULT_DATA_PATH is None, default=DEFAULT_DATA_PATH)
+    parser.add_argument('--contract', default='configs/contracts/global_training_data.json')
     parser.add_argument('--report', default='results/data_quality_report.json')
     parser.add_argument('--strict', action='store_true', help='Exit non-zero on a critical failure')
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
-def main() -> None:
-    args = parse_args()
+def main(argv=None) -> None:
+    args = parse_args(argv)
     report = audit_csv(args.data, args.contract)
     write_json(args.report, report)
     print(json.dumps(report, indent=2, default=str))

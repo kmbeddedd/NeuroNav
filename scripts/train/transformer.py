@@ -5,7 +5,7 @@ import platform
 import sys
 from pathlib import Path
 from typing import Any
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import numpy as np
 import torch
 from torch.optim.lr_scheduler import ReduceLROnPlateau
@@ -22,7 +22,7 @@ from src.visualization.scientific import plot_diffusion_samples, plot_frequency_
 
 def parse_args(argv: list[str] | None=None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Train a leakage-safe probabilistic GNSS forecaster')
-    parser.add_argument('--data', default=DEFAULT_DATA_PATH)
+    parser.add_argument('--data', required=DEFAULT_DATA_PATH is None, default=DEFAULT_DATA_PATH)
     parser.add_argument('--output', default='./results/transformer')
     parser.add_argument('--epochs', type=int, default=TRANSFORMER_DEFAULTS['epochs'])
     parser.add_argument('--early-stopping-patience', type=int, default=8)

@@ -10,17 +10,23 @@ import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
 
 from src.forecasting.base import ForecastModel, ModelMetadata
-from src.forecasting.features import (
+from src.forecasting.features.core import (
     FeatureManifest,
     build_inference_features,
     build_training_features,
 )
 from src.forecasting.models.harmonic_ridge import extract_harmonic_time_features
-from src.physics import OrbitalStateProvider, build_physics_features
+from src.forecasting.physics import OrbitalStateProvider, build_physics_features
 
 
 class RandomForestModel(ForecastModel):
-    """Multi-output Random Forest ensemble predicting orbit and clock errors from time and physics dynamics."""
+    """Random Forest regressor with secular time, diurnal harmonics, and deterministic SRP/RIC physics."""
+
+    supports_feature_manifest: bool = True
+    supports_nominal_physics: bool = True
+    supports_provided_state: bool = True
+    supports_irregular_timestamps: bool = True
+    requires_regular_cadence: bool = False
 
     def __init__(
         self,
@@ -32,6 +38,7 @@ class RandomForestModel(ForecastModel):
         enable_srp: bool = False,
         use_srp: Optional[bool] = None,
         use_ric: bool = False,
+        physics_mode: str = "nominal",
         physics_features: Optional[Sequence[str]] = None,
         orbital_state_provider: Optional[OrbitalStateProvider] = None,
         orbit_class: str = "MEO",
@@ -44,6 +51,7 @@ class RandomForestModel(ForecastModel):
         self.min_samples_leaf = min_samples_leaf
         self.max_features = max_features
         self.random_state = random_state
+        self.physics_mode = physics_mode
         self.enable_srp = bool(use_srp if use_srp is not None else enable_srp)
         self.use_ric = bool(use_ric)
         self.cadence_minutes = float(cadence_minutes)
@@ -63,6 +71,7 @@ class RandomForestModel(ForecastModel):
         self.feature_names_: List[str] = []
         self.target_cols = ["x_error_m", "y_error_m", "z_error_m", "clock_error_m"]
         self.feature_manifest = FeatureManifest(
+            physics_mode=self.physics_mode,
             use_ric=self.use_ric,
             use_srp=self.enable_srp,
             cadence_minutes=self.cadence_minutes,
@@ -216,4 +225,3 @@ class RandomForestModel(ForecastModel):
             description="Non-linear decision tree ensemble mapping time and orbital physics" + arch_suffix + " to multi-axis orbit/clock deviations.",
             parameter_count=n_trees * 50,
         )
-

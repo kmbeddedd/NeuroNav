@@ -12,17 +12,23 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
 from src.forecasting.base import ForecastModel, ModelMetadata
-from src.forecasting.features import (
+from src.forecasting.features.core import (
     FeatureManifest,
     build_inference_features,
     build_training_features,
     extract_harmonic_time_features,
 )
-from src.physics import OrbitalStateProvider
+from src.forecasting.physics import OrbitalStateProvider
 
 
 class HarmonicRidgeModel(ForecastModel):
     """Fits analytical polynomial drift + diurnal harmonics via regularized Ridge regression."""
+
+    supports_feature_manifest: bool = True
+    supports_nominal_physics: bool = True
+    supports_provided_state: bool = True
+    supports_irregular_timestamps: bool = True
+    requires_regular_cadence: bool = False
 
     def __init__(
         self,
@@ -31,6 +37,7 @@ class HarmonicRidgeModel(ForecastModel):
         harmonics: int = 6,
         use_srp: bool = False,
         use_ric: bool = False,
+        physics_mode: str = "nominal",
         cadence_minutes: float = 15.0,
         orbital_state_provider: Optional[OrbitalStateProvider] = None,
         orbit_class: str = "MEO",
@@ -40,6 +47,7 @@ class HarmonicRidgeModel(ForecastModel):
         super().__init__(name=name, model_type="harmonic_ridge", version=version)
         self.alpha = alpha
         self.harmonics = harmonics
+        self.physics_mode = physics_mode
         self.use_srp = bool(use_srp)
         self.use_ric = bool(use_ric)
         self.cadence_minutes = float(cadence_minutes)
@@ -50,6 +58,7 @@ class HarmonicRidgeModel(ForecastModel):
         self.pipeline: Optional[Any] = None
         self.target_cols = ["x_error_m", "y_error_m", "z_error_m", "clock_error_m"]
         self.feature_manifest = FeatureManifest(
+            physics_mode=self.physics_mode,
             use_ric=self.use_ric,
             use_srp=self.use_srp,
             cadence_minutes=self.cadence_minutes,

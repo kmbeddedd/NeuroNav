@@ -41,6 +41,7 @@ scratch_*.txt
 # Generated experiment outputs and research artifacts
 results/
 research/ps08/results/
+reports/generated/
 
 # Explicitly track deployment model bundles
 !models/deploy/

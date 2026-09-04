@@ -54,6 +54,12 @@ class ModelMetadata:
 class ForecastModel(ABC):
     """Abstract Base Class for all satellite-specific forecasting model adapters."""
 
+    supports_feature_manifest: bool = False
+    supports_nominal_physics: bool = False
+    supports_provided_state: bool = False
+    supports_irregular_timestamps: bool = True
+    requires_regular_cadence: bool = False
+
     def __init__(self, name: str, model_type: str, version: str = "1.0.0"):
         self.name = name
         self.model_type = model_type

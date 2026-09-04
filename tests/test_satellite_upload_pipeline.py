@@ -40,7 +40,6 @@ from src.physics import (
     get_orbital_state_provider,
 )
 
-
 @pytest.fixture
 def synthetic_geo_csv(tmp_path):
     """Creates a synthetic GEO CSV without a satellite_id column."""
@@ -347,4 +346,119 @@ def test_public_api_single_satellite_workflow(synthetic_geo_csv, synthetic_geo_t
     assert "predicted_I" in pred_df.columns
     assert "predicted_C" in pred_df.columns
     assert pred_df["satellite_id"].unique().tolist() == ["API_SAT"]
+
+
+def test_physics_mode_none_workflow(synthetic_geo_csv, synthetic_geo_test_csv, tmp_path):
+    """Verifies that physics_mode='none' disables all RIC and SRP physics context completely."""
+    reg_path = tmp_path / "registry.json"
+    artifacts_dir = tmp_path / "artifacts"
+    registry = SatelliteModelRegistry(reg_path)
+    pipeline = CalibrationPipeline(
+        registry=registry,
+        artifacts_dir=artifacts_dir,
+        candidate_models=["harmonic_ridge", "persistence"],
+    )
+
+    ds = run_sat_val(synthetic_geo_csv, satellite_id="SAT_NONE", orbit_type="GEO")
+    res = pipeline.train_single_satellite(
+        dataset=ds,
+        test_data=synthetic_geo_test_csv,
+        physics_mode="none",
+    )
+    assert res["satellite_id"] == "SAT_NONE"
+    assert res["physics_mode"] == "none"
+
+    sel = registry.get_selection("SAT_NONE")
+    assert sel.physics_mode == "none"
+    assert sel.use_ric is False
+    assert sel.use_srp is False
+
+    from src.forecasting.router import PredictionRouter
+    router = PredictionRouter(registry=registry, artifacts_dir=artifacts_dir)
+    preds = router.predict_single_satellite(
+        satellite_id="SAT_NONE",
+        history_df=ds.dataframe,
+        horizon_steps=6,
+        compute_ric=False,
+    )
+    assert len(preds) == 6
+    assert "predicted_X" in preds.columns
+    assert "predicted_Clock" in preds.columns
+
+
+def test_physics_mode_provided_workflow(synthetic_geo_csv, synthetic_geo_test_csv, tmp_path):
+    """Verifies that physics_mode='provided' ingests state_df, persists orbital_state.csv, and uses it on reload."""
+    reg_path = tmp_path / "registry.json"
+    artifacts_dir = tmp_path / "artifacts"
+    registry = SatelliteModelRegistry(reg_path)
+    pipeline = CalibrationPipeline(
+        registry=registry,
+        artifacts_dir=artifacts_dir,
+        candidate_models=["harmonic_ridge"],
+    )
+
+    times = pd.date_range("2026-01-01 00:00:00", periods=100, freq=pd.Timedelta(minutes=15))
+    state_df = pd.DataFrame({
+        "utc_time": times,
+        "position_x": np.linspace(42164000.0, 42165000.0, 100),
+        "position_y": np.linspace(0.0, 1000.0, 100),
+        "position_z": np.linspace(0.0, 500.0, 100),
+        "velocity_x": np.zeros(100),
+        "velocity_y": np.full(100, 3075.0),
+        "velocity_z": np.zeros(100),
+    })
+
+    ds = run_sat_val(synthetic_geo_csv, satellite_id="SAT_PROV", orbit_type="GEO")
+    res = pipeline.train_single_satellite(
+        dataset=ds,
+        test_data=synthetic_geo_test_csv,
+        physics_mode="provided",
+        state_df=state_df,
+    )
+    assert res["satellite_id"] == "SAT_PROV"
+    assert res["physics_mode"] == "provided"
+    assert res["state_artifact"] is not None
+    assert Path(res["state_artifact"]).exists()
+
+    sel = registry.get_selection("SAT_PROV")
+    assert sel.physics_mode == "provided"
+    assert sel.state_artifact is not None
+    assert Path(sel.state_artifact).exists()
+
+    from src.forecasting.router import PredictionRouter
+    router = PredictionRouter(registry=registry, artifacts_dir=artifacts_dir)
+    preds = router.predict_single_satellite(
+        satellite_id="SAT_PROV",
+        history_df=ds.dataframe,
+        horizon_steps=6,
+        compute_ric=True,
+    )
+    assert len(preds) == 6
+    assert "predicted_R" in preds.columns
+    assert "predicted_I" in preds.columns
+    assert "predicted_C" in preds.columns
+
+
+def test_physics_mode_provided_without_state_raises():
+    """Verifies that physics_mode='provided' without state_df raises a clear ValueError."""
+    pipeline = CalibrationPipeline()
+    times = pd.date_range("2026-01-01", periods=20, freq="15min")
+    ds = SatelliteDataset(
+        satellite_id="SAT_ERR",
+        orbit_type="GEO",
+        dataframe=pd.DataFrame({
+            "utc_time": times,
+            "x_error_m": np.ones(20),
+            "y_error_m": np.ones(20),
+            "z_error_m": np.ones(20),
+            "clock_error_m": np.ones(20),
+        }),
+    )
+    with pytest.raises(ValueError, match="state_df"):
+        pipeline.train_single_satellite(
+            dataset=ds,
+            test_data=ds.dataframe.iloc[-5:],
+            physics_mode="provided",
+            state_df=None,
+        )
 
