@@ -46,6 +46,7 @@ models/
   deploy/                          legacy GUI-compatible global bundles
   orbitiq_pretrained/              research comparison artifacts
 reports/                           calibration and evaluation evidence
+inference/                         operational prediction CLI and usage notes
 research/
   experiments/                     ablation code
   orbitiq/                          OrbitIQ comparison implementation
@@ -188,6 +189,46 @@ The canonical output schema is defined in
 [`configs/contracts/satellite_prediction.json`](configs/contracts/satellite_prediction.json).
 It contains timestamps, ECEF X/Y/Z and clock range-error forecasts, derived 3D orbit error,
 model provenance, and optional R/I/C components.
+
+## Inference process
+
+The production inference path has one implementation and two supported entry points:
+
+- Python and GUI integrations call `src.forecasting.predict_satellite` or
+  `predict_with_satellite_models`.
+- Operators can use the thin CLI in `inference/predict.py`.
+
+```text
+historical satellite CSV
+        -> validate and normalize schema, timestamps, units, and cadence
+        -> resolve the satellite's active selection from the registry
+        -> verify and load the exact versioned model artifact
+        -> restore the registered physics/state provider when configured
+        -> construct future timestamps from registered or requested cadence
+        -> run the selected model with its persisted preprocessing/features
+        -> derive 3D orbit error and optional R/I/C components
+        -> return the canonical prediction schema with model provenance
+```
+
+Inference is fail-closed. An unknown satellite, missing selection, missing artifact,
+invalid history, or incompatible artifact raises an actionable error; the router does
+not silently substitute another model.
+
+Run single-satellite inference from the repository root:
+
+```powershell
+python -m inference.predict `
+  --satellite GEO `
+  --orbit-type GEO `
+  --history data/ps08/DATA_GEO_Train.csv `
+  --horizon-steps 96 `
+  --output reports/inference/GEO_forecast.csv
+```
+
+The CLI validates the input before delegating to the public backend API. Omit `--output`
+to emit CSV to standard output, use `--step-interval-minutes` to explicitly override the
+registered cadence, and use `--no-ric` to disable R/I/C derivation. Full usage is in
+[`inference/README.md`](inference/README.md).
 
 ### Multi-satellite calibration and routing
 
