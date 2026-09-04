@@ -83,7 +83,7 @@ Commands:
                 run_headless_demo(controller, args.model, args.data)
 
     elif args.command == "predict":
-        from neuronav.inference import NeuroNavModel
+        from src.inference import NeuroNavModel
         model = NeuroNavModel.load(args.model)
         df = model.predict(args.data, satellite_id=args.satellite)
         if args.output:

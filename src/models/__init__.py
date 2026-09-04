@@ -1,7 +1,7 @@
-from neuronav.models.bilstm import GNSSBiLSTMGRU, BiLSTMGRUPyTorchModel
-from neuronav.models.transformer import GNSSHybridForecaster, GNSSForecaster
-from neuronav.models.diffusion import GNSSResidualDiffusion, ConditionalDiffusionDenoiser
-from neuronav.models.losses import (
+from src.models.bilstm import GNSSBiLSTMGRU, BiLSTMGRUPyTorchModel
+from src.models.transformer import GNSSHybridForecaster, GNSSForecaster
+from src.models.diffusion import GNSSResidualDiffusion, ConditionalDiffusionDenoiser
+from src.models.losses import (
     gaussian_nll_loss,
     student_t_nll_loss,
     spike_bce_loss,

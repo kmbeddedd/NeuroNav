@@ -8,9 +8,9 @@ from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import numpy as np
 import pandas as pd
-from neuronav.baselines import BASELINE_NAMES, DEFAULT_BASELINE_NAMES, evaluate_baselines
-from neuronav.config import HORIZON_MAP, TARGET_COLS_4
-from neuronav.evaluation import compare_candidate_to_baseline, evaluate_forecasts
+from src.baselines import BASELINE_NAMES, DEFAULT_BASELINE_NAMES, evaluate_baselines
+from src.config import HORIZON_MAP, TARGET_COLS_4
+from src.evaluation import compare_candidate_to_baseline, evaluate_forecasts
 EXPECTED_INTERVAL = pd.Timedelta(minutes=15)
 SP3_CLOCK_SENTINEL_SECONDS = 0.999999999999
 SP3_CLOCK_SENTINEL_ATOL = 1e-09

@@ -13,7 +13,7 @@ import matplotlib
 import numpy as np
 import pandas as pd
 import torch
-from neuronav.config import resolve_device
+from src.config import resolve_device
 from scipy import stats
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.gaussian_process import GaussianProcessRegressor

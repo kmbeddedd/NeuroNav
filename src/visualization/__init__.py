@@ -1,5 +1,5 @@
-from neuronav.visualization.forecast import plot_forecast_components, plot_3d_orbit_error
-from neuronav.visualization.scientific import (
+from src.visualization.forecast import plot_forecast_components, plot_3d_orbit_error
+from src.visualization.scientific import (
     plot_residual_qq,
     plot_training_history,
     plot_prediction_vs_actual,

@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from scripts.evaluate.evaluate_baselines import main as baseline_cli_main
-from neuronav.baselines import drift_forecast, evaluate_baselines, generate_baseline_forecasts, gaussian_process_forecast, persistence_forecast, seasonal_forecast, zero_forecast
+from src.baselines import drift_forecast, evaluate_baselines, generate_baseline_forecasts, gaussian_process_forecast, persistence_forecast, seasonal_forecast, zero_forecast
 TARGETS = ['Error_X', 'Error_Y', 'Error_Z', 'Error_Clock']
 
 class BaselineForecastTests(unittest.TestCase):

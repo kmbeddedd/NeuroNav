@@ -1,5 +1,5 @@
 import numpy as np
-from neuronav.calibration import conformal_interval, evaluate_conformal_intervals, fit_scaled_conformal
+from src.calibration import conformal_interval, evaluate_conformal_intervals, fit_scaled_conformal
 
 def test_scaled_conformal_handles_mask_and_produces_ordered_intervals():
     rng = np.random.default_rng(4)

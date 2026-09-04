@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 from pathlib import Path
 
-from neuronav.inference import NeuroNavModel, PredictionResult
+from src.inference import NeuroNavModel, PredictionResult
 
 
 def test_load_bilstm_model():

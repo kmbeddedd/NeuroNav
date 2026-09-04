@@ -10,15 +10,15 @@ import numpy as np
 import torch
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from scripts.data.audit_data import audit_csv
-from neuronav.artifacts import ARTIFACT_SCHEMA_VERSION, current_git_sha, scaler_to_state, set_reproducible_seed, sha256_file, write_json
-from neuronav.calibration import evaluate_conformal_intervals, fit_scaled_conformal
-from neuronav.config import DEFAULT_DATA_PATH, DEFAULT_SEED, DIFFUSION_DEFAULTS, FORECAST_HORIZON, HORIZON_MAP, SEQ_LEN, TRANSFORMER_DEFAULTS, resolve_device
-from neuronav.data import FastGPUTensorLoader, prepare_pytorch_datasets
-from neuronav.evaluation import compare_candidate_to_baseline, compute_probabilistic_metrics, compute_sample_metrics, compute_tensor_horizon_metrics, evaluate_forecasts
-from neuronav.models.losses import composite_transformer_loss, diffusion_mse_loss
-from neuronav.models.diffusion import ConditionalDiffusionDenoiser, DiffusionSchedule, sample_ddim_forecast
-from neuronav.models.transformer import GNSSForecaster
-from neuronav.visualization.scientific import plot_diffusion_samples, plot_frequency_spectrum, plot_multihorizon_heatmap, plot_probabilistic_uncertainty, plot_residual_qq, plot_training_history
+from src.artifacts import ARTIFACT_SCHEMA_VERSION, current_git_sha, scaler_to_state, set_reproducible_seed, sha256_file, write_json
+from src.calibration import evaluate_conformal_intervals, fit_scaled_conformal
+from src.config import DEFAULT_DATA_PATH, DEFAULT_SEED, DIFFUSION_DEFAULTS, FORECAST_HORIZON, HORIZON_MAP, SEQ_LEN, TRANSFORMER_DEFAULTS, resolve_device
+from src.data import FastGPUTensorLoader, prepare_pytorch_datasets
+from src.evaluation import compare_candidate_to_baseline, compute_probabilistic_metrics, compute_sample_metrics, compute_tensor_horizon_metrics, evaluate_forecasts
+from src.models.losses import composite_transformer_loss, diffusion_mse_loss
+from src.models.diffusion import ConditionalDiffusionDenoiser, DiffusionSchedule, sample_ddim_forecast
+from src.models.transformer import GNSSForecaster
+from src.visualization.scientific import plot_diffusion_samples, plot_frequency_spectrum, plot_multihorizon_heatmap, plot_probabilistic_uncertainty, plot_residual_qq, plot_training_history
 
 def parse_args(argv: list[str] | None=None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Train a leakage-safe probabilistic GNSS forecaster')
@@ -269,7 +269,7 @@ def run_training(argv: list[str] | None=None) -> dict[str, Any]:
     calibration = fit_scaled_conformal(val_real['actual_real'], val_real['mean_real'], val_real['scale_real'], val_real['mask'])
     conformal_report = evaluate_conformal_intervals(test_real['actual_real'], test_real['mean_real'], test_real['scale_real'], calibration, bundle['target_cols'], test_real['mask'])
     calibration_gate = _calibration_gate(conformal_report)
-    from neuronav.baselines import generate_baseline_forecasts
+    from src.baselines import generate_baseline_forecasts
     target_indices = np.asarray(bundle['target_feature_indices'], dtype=np.int64)
     feature_scaler = bundle['feature_scaler']
     history_scaled = bundle['X_test'][:, :, target_indices]

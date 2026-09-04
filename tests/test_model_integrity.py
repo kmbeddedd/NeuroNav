@@ -1,8 +1,8 @@
 import pytest
 import torch
-from neuronav.models.losses import composite_transformer_loss, dilate_loss, gaussian_nll_loss
-from neuronav.models.diffusion import DiffusionSchedule, sample_ddim_forecast
-from neuronav.models.transformer import GNSSForecaster, RevIN
+from src.models.losses import composite_transformer_loss, dilate_loss, gaussian_nll_loss
+from src.models.diffusion import DiffusionSchedule, sample_ddim_forecast
+from src.models.transformer import GNSSForecaster, RevIN
 
 def test_masked_loss_ignores_missing_target_values():
     mu = torch.zeros(1, 3, 2)

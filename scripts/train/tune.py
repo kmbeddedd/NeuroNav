@@ -9,10 +9,10 @@ import optuna
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
-from neuronav.artifacts import set_reproducible_seed
-from neuronav.config import DEFAULT_DATA_PATH, DEFAULT_SEED, FORECAST_HORIZON, SEQ_LEN, resolve_device
-from neuronav.data import prepare_pytorch_datasets
-from neuronav.models.bilstm import BiLSTMGRUPyTorchModel
+from src.artifacts import set_reproducible_seed
+from src.config import DEFAULT_DATA_PATH, DEFAULT_SEED, FORECAST_HORIZON, SEQ_LEN, resolve_device
+from src.data import prepare_pytorch_datasets
+from src.models.bilstm import BiLSTMGRUPyTorchModel
 
 def _masked_huber(prediction: torch.Tensor, actual: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     loss = F.smooth_l1_loss(prediction, actual, beta=0.5, reduction='none')

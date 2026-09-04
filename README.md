@@ -15,7 +15,7 @@ NeuroNav/
 │   │   └── inference_controller.py    # Orchestrates datasets & inference execution
 │   └── ui/                            # View components
 │
-├── neuronav/                          # Core production forecasting package
+├── src/                          # Core production forecasting package
 │   ├── config.py                      # Runtime constants & path configurations
 │   ├── data.py                        # Telemetry ingestion, validation & feature engineering
 │   ├── inference.py                   # High-level runtime inference engine (NeuroNavModel)
@@ -81,7 +81,7 @@ NeuroNav/
 The runtime inference engine is completely decoupled from training scripts, PyTorch internals, and preprocessing pipelines:
 
 ```python
-from neuronav.inference import NeuroNavModel
+from src.inference import NeuroNavModel
 
 # 1. Load model by shortcut or directory path
 model = NeuroNavModel.load("transformer")  # or "bilstm" or "models/deploy/bilstm"

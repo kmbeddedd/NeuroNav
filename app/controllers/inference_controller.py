@@ -6,8 +6,8 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from neuronav.inference import NeuroNavModel
-from neuronav.visualization.forecast import plot_3d_orbit_error, plot_forecast_components
+from src.inference import NeuroNavModel
+from src.visualization.forecast import plot_3d_orbit_error, plot_forecast_components
 
 
 class InferenceController:

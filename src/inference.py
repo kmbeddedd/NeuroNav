@@ -14,8 +14,8 @@ import numpy as np
 import pandas as pd
 import torch
 
-from neuronav.artifacts import scaler_from_state
-from neuronav.config import (
+from src.artifacts import scaler_from_state
+from src.config import (
     DEFAULT_SEED,
     EXPECTED_CADENCE_MINUTES,
     FORECAST_HORIZON,
@@ -24,9 +24,9 @@ from neuronav.config import (
     TARGET_COLS_4,
     resolve_device,
 )
-from neuronav.data import engineer_features
-from neuronav.models.bilstm import BiLSTMGRUPyTorchModel
-from neuronav.models.transformer import GNSSForecaster
+from src.data import engineer_features
+from src.models.bilstm import BiLSTMGRUPyTorchModel
+from src.models.transformer import GNSSForecaster
 
 
 @dataclass

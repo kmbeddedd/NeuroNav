@@ -2,7 +2,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from neuronav.config import SEQ_LEN, FORECAST_HORIZON, TARGET_COLS_4
+from src.config import SEQ_LEN, FORECAST_HORIZON, TARGET_COLS_4
 
 def compute_prn_embedding_dim(num_satellites: int) -> int:
     return int(math.ceil(1.6 * num_satellites ** 0.52))

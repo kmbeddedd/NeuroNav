@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from neuronav.config import SEQ_LEN, FORECAST_HORIZON, TARGET_COLS_4
+from src.config import SEQ_LEN, FORECAST_HORIZON, TARGET_COLS_4
 
 class BiLSTMGRUPyTorchModel(nn.Module):
 

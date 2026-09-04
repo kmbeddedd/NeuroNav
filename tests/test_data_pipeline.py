@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 import numpy as np
 import pandas as pd
-from neuronav.data import load_and_clean_data, prepare_pytorch_datasets
+from src.data import load_and_clean_data, prepare_pytorch_datasets
 TARGETS = ['Error_X', 'Error_Y', 'Error_Z', 'Error_Clock']
 
 def synthetic_frame(epochs: int=80, *, sentinel_index: int | None=10, missing_index: int | None=None) -> pd.DataFrame:
@@ -175,7 +175,7 @@ class DataPipelineContractTests(unittest.TestCase):
         np.testing.assert_allclose(unscaled_Y_test[..., 0], 9999.0)
 
     def test_validate_temporal_windows_catches_leakage_violations(self):
-        from neuronav.data import validate_temporal_windows
+        from src.data import validate_temporal_windows
         val_start = pd.Timestamp('2025-01-01 12:00:00')
         test_start = pd.Timestamp('2025-01-01 15:00:00')
 

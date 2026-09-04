@@ -1,8 +1,8 @@
 import math
 import torch
 import torch.nn as nn
-from neuronav.models.transformer import PositionalEncoding
-from neuronav.config import DIFFUSION_DEFAULTS, TARGET_COLS_4
+from src.models.transformer import PositionalEncoding
+from src.config import DIFFUSION_DEFAULTS, TARGET_COLS_4
 
 class DiffusionSchedule:
 
