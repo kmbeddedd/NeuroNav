@@ -1,0 +1,80 @@
+{
+  "model_name": "GNSS-BiLSTM-GRU",
+  "model_type": "bilstm",
+  "model_class": "BiLSTMGRUPyTorchModel",
+  "version": "1.0.0",
+  "artifact_schema_version": 1,
+  "model_file": "model.pt",
+  "input_features": [
+    "Error_X",
+    "Error_Y",
+    "Error_Z",
+    "Error_Clock",
+    "time_sin",
+    "time_cos",
+    "Error_X_roll_mean",
+    "Error_Y_roll_mean",
+    "Error_Z_roll_mean",
+    "Error_Clock_roll_mean",
+    "Broadcast_X",
+    "Broadcast_Y",
+    "Broadcast_Z",
+    "Broadcast_Clock",
+    "Broadcast_VX",
+    "Broadcast_VY",
+    "Broadcast_VZ",
+    "Broadcast_Clock_Drift",
+    "Broadcast_Radius",
+    "Broadcast_Phase_Sin",
+    "Broadcast_Phase_Cos"
+  ],
+  "target_columns": [
+    "Error_X",
+    "Error_Y",
+    "Error_Z",
+    "Error_Clock"
+  ],
+  "target_feature_indices": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "sequence_length": 96,
+  "forecast_horizon": 96,
+  "satellite_classes": [
+    "G01",
+    "G02",
+    "G03",
+    "G04",
+    "G05",
+    "G06",
+    "G07",
+    "G08",
+    "R01",
+    "R02",
+    "R03",
+    "R04",
+    "R05",
+    "R06"
+  ],
+  "cadence_minutes": 15,
+  "uncertainty_supported": false,
+  "model_config": {
+    "seq_len": 96,
+    "n_features": 21,
+    "output_dim": 4,
+    "target_feature_indices": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "forecast_horizon": 96,
+    "bilstm_units": 64,
+    "gru_units": 64,
+    "dropout_1": 0.2,
+    "dropout_2": 0.1
+  },
+  "description": "Bidirectional LSTM + GRU recurrent neural forecaster for multi-horizon GNSS satellite orbit and clock errors"
+}

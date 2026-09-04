@@ -2,10 +2,10 @@ import pytest
 from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from data_acquisition.build_orbitiq_benchmark import generate_orbitiq_benchmark
-from scripts.audit_data import audit_csv
-from scripts.train_orbitiq_pipeline import run_pipeline
-DATA_DIR = Path('Data_PS-08')
+from scripts.data.build_orbitiq_benchmark import generate_orbitiq_benchmark
+from scripts.data.audit_data import audit_csv
+from scripts.train.orbitiq import run_pipeline
+DATA_DIR = Path('research/ps08/data')
 
 def test_orbitiq_benchmark_generation_and_audit(tmp_path):
     benchmark_path = tmp_path / 'test_orbitiq_benchmark.csv'

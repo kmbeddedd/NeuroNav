@@ -1,6 +1,6 @@
 from pathlib import Path
 import pandas as pd
-from scripts.audit_data import audit_csv
+from scripts.data.audit_data import audit_csv
 
 def test_audit_detects_converted_sp3_clock_sentinel(tmp_path: Path):
     rows = []

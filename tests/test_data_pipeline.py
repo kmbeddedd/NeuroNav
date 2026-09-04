@@ -110,5 +110,128 @@ class DataPipelineContractTests(unittest.TestCase):
             path = self.write_csv(frame, directory)
             with self.assertRaisesRegex(ValueError, 'Insufficient history'):
                 prepare_pytorch_datasets(str(path), input_window=4, forecast_horizon=3, train_end_date='2025-01-01 01:30:00')
+
+    def test_strict_causal_test_split_prevents_input_leakage(self):
+        frame = synthetic_frame()
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.write_csv(frame, directory)
+            bundle = self.prepare(path)
+        test_start = pd.Timestamp(bundle['split_metadata']['test_start'])
+        self.assertEqual(bundle['split_metadata']['evaluation_mode'], 'strict_block')
+        self.assertTrue(bundle['split_metadata']['strict_test_input_boundary'])
+        self.assertGreater(bundle['split_metadata']['purged_leakage_windows'], 0)
+        self.assertGreater(len(bundle['X_test']), 0)
+
+        for i in range(len(bundle['X_test'])):
+            inp = bundle['INPUT_TIMESTAMPS_test'][i]
+            lbl = bundle['LABEL_TIMESTAMPS_test'][i]
+            max_in = pd.Timestamp(inp[-1])
+            min_lbl = pd.Timestamp(lbl[0])
+            self.assertLess(max_in, test_start)
+            self.assertGreaterEqual(min_lbl, test_start)
+            self.assertTrue(set(inp).isdisjoint(set(lbl)))
+            self.assertFalse(any(pd.Timestamp(t) >= test_start for t in inp))
+
+    def test_test_input_features_contain_no_test_period_targets_or_rolling_stats(self):
+        frame = synthetic_frame()
+        test_boundary = pd.Timestamp('2025-01-01 15:00:00')
+        # Inject extreme, distinctive marker values into the test period
+        test_mask = frame['Timestamp'] >= test_boundary
+        frame.loc[test_mask, 'Error_X'] = 9999.0
+        frame.loc[test_mask, 'Error_Y'] = 8888.0
+        frame.loc[test_mask, 'Error_Z'] = 7777.0
+        frame.loc[test_mask, 'Error_Clock'] = 6666.0
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.write_csv(frame, directory)
+            bundle = self.prepare(path)
+
+        # 1. Verify scaler was fit exclusively on pre-validation training history
+        self.assertLess(bundle['target_scaler'].mean_[0], 50.0)
+        self.assertLess(bundle['feature_scaler'].mean_[0], 50.0)
+
+        # 2. Recover unscaled physical features in test inputs
+        unscaled_X_test = bundle['feature_scaler'].inverse_transform(
+            bundle['X_test'].reshape(-1, bundle['num_features'])
+        ).reshape(bundle['X_test'].shape)
+
+        target_and_roll_cols = [
+            'Error_X', 'Error_Y', 'Error_Z', 'Error_Clock',
+            'Error_X_roll_mean', 'Error_Y_roll_mean', 'Error_Z_roll_mean', 'Error_Clock_roll_mean'
+        ]
+        for col in target_and_roll_cols:
+            if col in bundle['feature_cols']:
+                col_idx = bundle['feature_cols'].index(col)
+                values = unscaled_X_test[:, :, col_idx]
+                self.assertTrue(
+                    np.all(values < 100.0),
+                    f"Feature {col} leaked test-period values into test input X: max={values.max()}"
+                )
+
+        # 3. Verify actual test labels contain the test-period values
+        unscaled_Y_test = bundle['target_scaler'].inverse_transform(
+            bundle['Y_test'].reshape(-1, bundle['output_dim'])
+        ).reshape(bundle['Y_test'].shape)
+        np.testing.assert_allclose(unscaled_Y_test[..., 0], 9999.0)
+
+    def test_validate_temporal_windows_catches_leakage_violations(self):
+        from src.data import validate_temporal_windows
+        val_start = pd.Timestamp('2025-01-01 12:00:00')
+        test_start = pd.Timestamp('2025-01-01 15:00:00')
+
+        # Test valid windows
+        valid_parts = {
+            'train': {
+                'input_ts': [pd.date_range('2025-01-01 10:00:00', periods=4, freq='15min').to_numpy(dtype='datetime64[ns]')],
+                'label_ts': [pd.date_range('2025-01-01 11:00:00', periods=3, freq='15min').to_numpy(dtype='datetime64[ns]')],
+                'satellite_id': ['G01']
+            },
+            'val': {
+                'input_ts': [pd.date_range('2025-01-01 11:00:00', periods=4, freq='15min').to_numpy(dtype='datetime64[ns]')],
+                'label_ts': [pd.date_range('2025-01-01 12:00:00', periods=3, freq='15min').to_numpy(dtype='datetime64[ns]')],
+                'satellite_id': ['G01']
+            },
+            'test': {
+                'input_ts': [pd.date_range('2025-01-01 14:00:00', periods=4, freq='15min').to_numpy(dtype='datetime64[ns]')],
+                'label_ts': [pd.date_range('2025-01-01 15:00:00', periods=3, freq='15min').to_numpy(dtype='datetime64[ns]')],
+                'satellite_id': ['G01']
+            }
+        }
+        report = validate_temporal_windows(valid_parts, val_start, test_start, evaluation_mode='strict_block')
+        self.assertTrue(report['test']['strict_out_of_sample'])
+
+        # Test leakage: test input containing test_start timestamp
+        leaked_parts = {
+            'train': valid_parts['train'],
+            'val': valid_parts['val'],
+            'test': {
+                'input_ts': [pd.date_range('2025-01-01 14:15:00', periods=4, freq='15min').to_numpy(dtype='datetime64[ns]')],
+                'label_ts': [pd.date_range('2025-01-01 15:15:00', periods=3, freq='15min').to_numpy(dtype='datetime64[ns]')],
+                'satellite_id': ['G01']
+            }
+        }
+        with self.assertRaisesRegex(ValueError, 'Data leakage detected in test window'):
+            validate_temporal_windows(leaked_parts, val_start, test_start, evaluation_mode='strict_block')
+
+        # Test invalid evaluation_mode raises
+        with self.assertRaisesRegex(ValueError, 'evaluation_mode must be'):
+            validate_temporal_windows(valid_parts, val_start, test_start, evaluation_mode='invalid_mode')
+
+    def test_rolling_evaluation_mode_is_explicit(self):
+        frame = synthetic_frame()
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.write_csv(frame, directory)
+            # Default is strict_block
+            bundle_default = prepare_pytorch_datasets(str(path), input_window=4, forecast_horizon=3, batch_size=8, train_end_date='2025-01-01 15:00:00')
+            self.assertEqual(bundle_default['split_metadata']['evaluation_mode'], 'strict_block')
+            self.assertTrue(bundle_default['split_metadata']['strict_test_input_boundary'])
+
+            # Explicit rolling
+            bundle_rolling = prepare_pytorch_datasets(str(path), input_window=4, forecast_horizon=3, batch_size=8, train_end_date='2025-01-01 15:00:00', evaluation_mode='rolling')
+            self.assertEqual(bundle_rolling['split_metadata']['evaluation_mode'], 'rolling')
+            self.assertFalse(bundle_rolling['split_metadata']['strict_test_input_boundary'])
+            self.assertGreater(len(bundle_rolling['X_test']), len(bundle_default['X_test']))
+
+
 if __name__ == '__main__':
     unittest.main()
