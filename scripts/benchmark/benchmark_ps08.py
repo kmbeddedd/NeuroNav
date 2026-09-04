@@ -4,10 +4,11 @@ import json
 import math
 import random
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 import sys
 from typing import Any, Callable
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import matplotlib
 import numpy as np
@@ -551,61 +552,52 @@ def _geo_moe_loss(
     return huber + lambda_amp * amp_loss + lambda_dir * dir_loss + lambda_regime * focal_bce
 
 
-def _build_geo_moe_examples(
-    frame: pd.DataFrame,
+def _build_geo_moe_train_examples(
+    train_frame: pd.DataFrame,
     origin: pd.Timestamp,
     series_idx: int,
     baseline: Any,
     detector: dict[str, float],
     c_d: np.ndarray,
     s_d: np.ndarray,
-    val_start: pd.Timestamp,
     oversample_high_amp: int = 3,
-) -> tuple[dict[str, list], dict[str, list]]:
-    """Build train/val examples with 3× oversampling of high-amplitude training examples."""
+) -> dict[str, list]:
+    """Build training examples strictly from train_frame with oversampling of high-amplitude observations."""
     train_data: dict[str, list] = {'hist': [], 'q': [], 'sid': [], 'target_d': [], 'target_r': []}
-    val_data:   dict[str, list] = {'hist': [], 'q': [], 'sid': [], 'target_d': [], 'target_r': []}
     x0 = detector['x0']
 
-    for target_idx in range(3, len(frame)):
-        query_time = frame['utc_time'].iloc[target_idx]
-        is_val     = query_time >= val_start
-        cutoffs    = [target_idx - 1]
+    for target_idx in range(3, len(train_frame)):
+        query_time = train_frame['utc_time'].iloc[target_idx]
+        cutoffs = [target_idx - 1]
         for h in (6, 12, 24, 48):
             el = np.flatnonzero(
-                (frame['utc_time'].iloc[:target_idx] <= query_time - pd.Timedelta(hours=h)).to_numpy()
+                (train_frame['utc_time'].iloc[:target_idx] <= query_time - pd.Timedelta(hours=h)).to_numpy()
             )
             if len(el):
                 cutoffs.append(int(el[-1]))
         cutoffs = sorted(set(c for c in cutoffs if c >= 2))
-        if is_val:
-            cutoffs = [c for c in cutoffs if frame['utc_time'].iloc[c] < val_start]
 
         for c in cutoffs:
-            hist, meta = _physical_history_tensor(frame, c, query_time, origin, baseline, c_d, s_d)
+            hist, meta = _physical_history_tensor(train_frame, c, query_time, origin, baseline, c_d, s_d)
             rms    = float(np.sqrt(np.mean(meta['orbit_norms'][-4:] ** 2)))
             flips  = float(np.mean(np.diff(np.sign(meta['vals'][:, 0])) != 0)) if len(meta['vals']) > 1 else 0.0
             q_feat = _physical_query_features(
-                query_time, frame['utc_time'].iloc[c], origin,
+                query_time, train_frame['utc_time'].iloc[c], origin,
                 _compute_regime_probability(meta['orbit_norms'], detector), rms, flips,
             )
             x_q    = time_features(pd.Series([query_time]), origin)
             base_q = baseline.predict(x_q)[0]
-            true_d = (frame[list(TARGETS)].iloc[target_idx].to_numpy(dtype=float) - base_q - c_d) / s_d
-            t_norm = float(np.sqrt(np.sum(frame[list(TARGETS)[:3]].iloc[target_idx].to_numpy(dtype=float) ** 2)))
-            # Soft regime target: sigmoid of (norm − x0) / scale
+            true_d = (train_frame[list(TARGETS)].iloc[target_idx].to_numpy(dtype=float) - base_q - c_d) / s_d
+            t_norm = float(np.sqrt(np.sum(train_frame[list(TARGETS)[:3]].iloc[target_idx].to_numpy(dtype=float) ** 2)))
             t_regime = float(1.0 / (1.0 + np.exp(-((t_norm - x0) / max(detector['scale'], 0.5)))))
 
-            dest = val_data if is_val else train_data
-            dest['hist'].append(hist)
-            dest['q'].append(q_feat)
-            dest['sid'].append(series_idx)
-            dest['target_d'].append(true_d)
-            dest['target_r'].append(t_regime)
+            train_data['hist'].append(hist)
+            train_data['q'].append(q_feat)
+            train_data['sid'].append(series_idx)
+            train_data['target_d'].append(true_d)
+            train_data['target_r'].append(t_regime)
 
-            # 3× oversample high-amplitude training examples (never validation).
-            # ponytail: simple replication; focal sampling overkill at 142 rows.
-            if not is_val and t_norm > x0:
+            if t_norm > x0:
                 for _ in range(oversample_high_amp - 1):
                     train_data['hist'].append(hist)
                     train_data['q'].append(q_feat)
@@ -613,32 +605,189 @@ def _build_geo_moe_examples(
                     train_data['target_d'].append(true_d)
                     train_data['target_r'].append(t_regime)
 
-    return train_data, val_data
+    return train_data
+
+
+def _build_geo_moe_val_examples(
+    val_frame: pd.DataFrame,
+    train_frame: pd.DataFrame,
+    origin: pd.Timestamp,
+    series_idx: int,
+    baseline: Any,
+    detector: dict[str, float],
+    c_d: np.ndarray,
+    s_d: np.ndarray,
+) -> dict[str, list]:
+    """Build validation examples from val_frame, referencing history only from train_frame."""
+    val_data: dict[str, list] = {'hist': [], 'q': [], 'sid': [], 'target_d': [], 'target_r': []}
+    x0 = detector['x0']
+    train_cutoff = len(train_frame) - 1
+
+    for target_idx in range(len(val_frame)):
+        query_time = val_frame['utc_time'].iloc[target_idx]
+        assert train_frame['utc_time'].iloc[train_cutoff] < query_time, "Validation query must be strictly after train history"
+
+        hist, meta = _physical_history_tensor(train_frame, train_cutoff, query_time, origin, baseline, c_d, s_d)
+        rms    = float(np.sqrt(np.mean(meta['orbit_norms'][-4:] ** 2)))
+        flips  = float(np.mean(np.diff(np.sign(meta['vals'][:, 0])) != 0)) if len(meta['vals']) > 1 else 0.0
+        q_feat = _physical_query_features(
+            query_time, train_frame['utc_time'].iloc[train_cutoff], origin,
+            _compute_regime_probability(meta['orbit_norms'], detector), rms, flips,
+        )
+        x_q    = time_features(pd.Series([query_time]), origin)
+        base_q = baseline.predict(x_q)[0]
+        true_d = (val_frame[list(TARGETS)].iloc[target_idx].to_numpy(dtype=float) - base_q - c_d) / s_d
+        t_norm = float(np.sqrt(np.sum(val_frame[list(TARGETS)[:3]].iloc[target_idx].to_numpy(dtype=float) ** 2)))
+        t_regime = float(1.0 / (1.0 + np.exp(-((t_norm - x0) / max(detector['scale'], 0.5)))))
+
+        val_data['hist'].append(hist)
+        val_data['q'].append(q_feat)
+        val_data['sid'].append(series_idx)
+        val_data['target_d'].append(true_d)
+        val_data['target_r'].append(t_regime)
+
+    return val_data
+
+
+@dataclass
+class GeoFoldState:
+    train_start: pd.Timestamp
+    train_end: pd.Timestamp
+    prediction_start: pd.Timestamp
+    prediction_end: pd.Timestamp
+    baseline: Any
+    center_d: np.ndarray
+    scale_d: np.ndarray
+    detector: dict[str, float]
+    model: Optional[GEOGatedMoEModel] = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+def fit_geo_fold(
+    train_frame: pd.DataFrame,
+    origin: pd.Timestamp,
+    series_idx: int = 0,
+    pred_start: Optional[pd.Timestamp] = None,
+    pred_end: Optional[pd.Timestamp] = None,
+    num_series: int = 1,
+    device: Optional[torch.device] = None,
+    epochs: int = 25,
+    seed: int = SEED,
+) -> GeoFoldState:
+    """Strictly causal fold fitting: fits baseline, scalers, detector, and trains model on train_frame only."""
+    train_start = train_frame['utc_time'].min()
+    train_end   = train_frame['utc_time'].max()
+    if pred_start is not None:
+        assert train_end < pred_start, (
+            f"Lineage violation! train_end ({train_end}) >= pred_start ({pred_start})"
+        )
+
+    # 1. Baseline fitted on train_frame only
+    baseline = _fit_causal_baseline(train_frame, origin)
+
+    # 2. Residual center and scale from train_frame only
+    x_tr = time_features(train_frame['utc_time'], origin)
+    base_preds = baseline.predict(x_tr)
+    deltas = train_frame[list(TARGETS)].to_numpy(dtype=float) - base_preds
+    center_d = np.median(deltas, axis=0)
+    q25, q75 = np.quantile(deltas, [0.25, 0.75], axis=0)
+    scale_d = np.maximum((q75 - q25) / 1.349, 1e-4)
+
+    # 3. Regime detector from train_frame only
+    detector = _fit_regime_detector(train_frame)
+
+    # 4. Neural model trained on train_frame only
+    model = None
+    if device is not None and epochs > 0:
+        tr_data = _build_geo_moe_train_examples(
+            train_frame, origin, series_idx, baseline, detector, center_d, scale_d, oversample_high_amp=3
+        )
+        if len(tr_data['hist']) > 0:
+            seed_everything(seed)
+            h_dim = tr_data['hist'][0].shape[-1]
+            q_dim = tr_data['q'][0].shape[-1]
+            model = GEOGatedMoEModel(h_dim, q_dim, num_series).to(device)
+            optimizer = torch.optim.AdamW(model.parameters(), lr=0.001, weight_decay=0.0001)
+            s_d_tensor = torch.as_tensor(scale_d, dtype=torch.float32, device=device)
+
+            tr_tensors = (
+                torch.as_tensor(np.array(tr_data['hist']),     dtype=torch.float32),
+                torch.as_tensor(np.array(tr_data['q']),        dtype=torch.float32),
+                torch.as_tensor(np.array(tr_data['sid']),      dtype=torch.long),
+                torch.as_tensor(np.array(tr_data['target_d']), dtype=torch.float32),
+                torch.as_tensor(np.array(tr_data['target_r']), dtype=torch.float32),
+            )
+            loader = DataLoader(TensorDataset(*tr_tensors), batch_size=32, shuffle=True)
+            model.train()
+            for _ in range(epochs):
+                for h, q, sid, td, tr in loader:
+                    h, q   = h.to(device), q.to(device)
+                    sid    = sid.to(device)
+                    td, tr = td.to(device), tr.to(device)
+                    optimizer.zero_grad(set_to_none=True)
+                    pred_d, gate_logit, _ = model(h, q, sid)
+                    loss = _geo_moe_loss(pred_d, td, gate_logit, tr, s_d_tensor)
+                    loss.backward()
+                    nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                    optimizer.step()
+            model.eval()
+
+    metadata = {
+        'train_rows': len(train_frame),
+        'epochs': epochs,
+        'x0': float(detector['x0']),
+        'scale': float(detector['scale']),
+    }
+    return GeoFoldState(
+        train_start=train_start,
+        train_end=train_end,
+        prediction_start=pred_start if pred_start is not None else train_end,
+        prediction_end=pred_end if pred_end is not None else train_end,
+        baseline=baseline,
+        center_d=center_d,
+        scale_d=scale_d,
+        detector=detector,
+        model=model,
+        metadata=metadata,
+    )
 
 
 def _rolling_backtest_geo(
     frame: pd.DataFrame,
     origin: pd.Timestamp,
-    baseline: Any,
-    detector: dict[str, float],
-    c_d: np.ndarray,
-    s_d: np.ndarray,
-    model: GEOGatedMoEModel,
     device: torch.device,
-) -> dict[str, Any]:
-    """4-fold causal rolling backtest within GEO training data only. Never uses Day-8 actuals."""
+    epochs: int = 25,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """True rolling-origin causal backtest within GEO training data only.
+    
+    Every fold independently fits baseline, scalers, detector, and trains
+    a brand new GEOGatedMoEModel from scratch on train_frame only.
+    Compares against Persistence and Harmonic Ridge on identical fold boundaries.
+    Never uses Day-8 actuals.
+    """
     times     = frame['utc_time']
     day_start = times.min().floor('D')
-    fold_configs = [(3, 4, 5), (4, 5, 6), (5, 6, 7), (6, 7, 8)]
+    # Fold definitions:
+    # Fold 1: train Days 1-3, predict Day 4
+    # Fold 2: train Days 1-4, predict Day 5
+    # Fold 3: train Days 1-5, predict Day 6
+    # Fold 4: train Days 1-6, predict Day 7
+    fold_configs = [
+        (1, 3, 4),
+        (2, 4, 5),
+        (3, 5, 6),
+        (4, 6, 7),
+    ]
     fold_results: dict[str, Any] = {}
+    csv_rows: list[dict[str, Any]] = []
     all_maes: list[float] = []
+    all_rmses: list[float] = []
     all_ws:   list[float] = []
-    model.eval()
 
-    for fold_idx, (tr_end_day, pred_start_day, pred_end_day) in enumerate(fold_configs):
-        train_end  = day_start + pd.Timedelta(days=tr_end_day)
-        pred_start = day_start + pd.Timedelta(days=pred_start_day)
-        pred_end   = day_start + pd.Timedelta(days=pred_end_day)
+    for fold_num, tr_days, pred_days in fold_configs:
+        train_end  = day_start + pd.Timedelta(days=tr_days)
+        pred_start = day_start + pd.Timedelta(days=tr_days)
+        pred_end   = day_start + pd.Timedelta(days=pred_days)
         train_mask = times < train_end
         pred_mask  = (times >= pred_start) & (times < pred_end)
 
@@ -647,54 +796,147 @@ def _rolling_backtest_geo(
 
         train_frame = frame[train_mask].reset_index(drop=True)
         pred_frame  = frame[pred_mask].reset_index(drop=True)
-        fold_baseline = _fit_causal_baseline(train_frame, origin)
-        x_tr        = time_features(train_frame['utc_time'], origin)
-        fold_deltas = train_frame[list(TARGETS)].to_numpy(dtype=float) - fold_baseline.predict(x_tr)
-        fold_c_d    = np.median(fold_deltas, axis=0)
-        fold_q25, fold_q75 = np.quantile(fold_deltas, [0.25, 0.75], axis=0)
-        fold_s_d    = np.maximum((fold_q75 - fold_q25) / 1.349, 0.0001)
-        fold_det    = _fit_regime_detector(train_frame)
+
+        # Lineage assertion
+        fit_end = train_frame['utc_time'].max()
+        prediction_start = pred_frame['utc_time'].min()
+        assert fit_end < prediction_start, (
+            f"Lineage violation in Fold {fold_num}: fit_end ({fit_end}) >= prediction_start ({prediction_start})"
+        )
+
+        # 1. Fit fold state & train fresh model from scratch on train_frame only
+        fold_state = fit_geo_fold(
+            train_frame=train_frame,
+            origin=origin,
+            series_idx=0,
+            pred_start=prediction_start,
+            pred_end=pred_frame['utc_time'].max(),
+            num_series=1,
+            device=device,
+            epochs=epochs,
+            seed=SEED + fold_num,
+        )
+
         train_cutoff = len(train_frame) - 1
 
-        hists, qs, sids = [], [], []
+        # 2. Predict on pred_frame
+        hists, qs, sids, bases = [], [], [], []
         for _, query_time in enumerate(pred_frame['utc_time']):
-            hist, meta = _physical_history_tensor(train_frame, train_cutoff, query_time, origin, fold_baseline, fold_c_d, fold_s_d)
+            # Strictly causal: max(history_time) < query_time
+            assert train_frame['utc_time'].iloc[train_cutoff] < query_time
+            hist, meta = _physical_history_tensor(
+                train_frame, train_cutoff, query_time, origin,
+                fold_state.baseline, fold_state.center_d, fold_state.scale_d
+            )
             rms   = float(np.sqrt(np.mean(meta['orbit_norms'][-4:] ** 2)))
             flips = float(np.mean(np.diff(np.sign(meta['vals'][:, 0])) != 0)) if len(meta['vals']) > 1 else 0.0
             q_feat = _physical_query_features(
                 query_time, train_frame['utc_time'].iloc[train_cutoff], origin,
-                _compute_regime_probability(meta['orbit_norms'], fold_det), rms, flips,
+                _compute_regime_probability(meta['orbit_norms'], fold_state.detector), rms, flips,
             )
+            x_q = time_features(pd.Series([query_time]), origin)
+            b_q = fold_state.baseline.predict(x_q)[0]
+
             hists.append(hist)
             qs.append(q_feat)
             sids.append(0)
+            bases.append(b_q)
 
+        # Model inference
         with torch.no_grad():
-            pred_d, _, _ = model(
+            pred_d, _, _ = fold_state.model(
                 torch.as_tensor(np.array(hists), dtype=torch.float32, device=device),
                 torch.as_tensor(np.array(qs),    dtype=torch.float32, device=device),
                 torch.as_tensor(np.array(sids),  dtype=torch.long,    device=device),
             )
-            delta_phys = pred_d.cpu().numpy() * fold_s_d + fold_c_d
+            delta_phys = pred_d.cpu().numpy() * fold_state.scale_d + fold_state.center_d
 
-        pred_phys = fold_baseline.predict(time_features(pred_frame['utc_time'], origin)) + delta_phys
-        actual    = pred_frame[list(TARGETS)].to_numpy(dtype=float)
-        residuals = pred_phys - actual
-        mae    = float(np.mean(np.abs(residuals)))
-        w_mean = float(np.mean([stats.shapiro(residuals[:, i]).statistic for i in range(4)]))
-        all_maes.append(mae)
-        all_ws.append(w_mean)
-        fold_results[f'fold_{fold_idx + 1}'] = {
-            'train_rows': int(train_mask.sum()), 'pred_rows': int(pred_mask.sum()),
-            'mae_m': mae, 'mean_shapiro_w': w_mean,
+        pred_moe   = np.array(bases) + delta_phys
+        pred_ridge = np.array(bases)
+        pred_persist = np.repeat(train_frame[list(TARGETS)].iloc[[-1]].to_numpy(dtype=float), len(pred_frame), axis=0)
+        actual     = pred_frame[list(TARGETS)].to_numpy(dtype=float)
+
+        # Residuals
+        res_moe     = pred_moe - actual
+        res_ridge   = pred_ridge - actual
+        res_persist = pred_persist - actual
+
+        mae_moe     = float(np.mean(np.abs(res_moe)))
+        rmse_moe    = float(np.sqrt(np.mean(res_moe ** 2)))
+        w_moe       = float(np.mean([stats.shapiro(res_moe[:, i]).statistic for i in range(4)]))
+
+        mae_ridge   = float(np.mean(np.abs(res_ridge)))
+        rmse_ridge  = float(np.sqrt(np.mean(res_ridge ** 2)))
+        w_ridge     = float(np.mean([stats.shapiro(res_ridge[:, i]).statistic for i in range(4)]))
+
+        mae_persist = float(np.mean(np.abs(res_persist)))
+        rmse_persist = float(np.sqrt(np.mean(res_persist ** 2)))
+        w_persist   = float(np.mean([stats.shapiro(res_persist[:, i]).statistic for i in range(4)]))
+
+        # Regime breakdown for MoE
+        actual_norms = np.sqrt(np.sum(actual[:, :3] ** 2, axis=1))
+        high_mask = actual_norms > fold_state.detector['x0']
+        high_mae = float(np.mean(np.abs(res_moe[high_mask]))) if np.any(high_mask) else mae_moe
+        norm_mae = float(np.mean(np.abs(res_moe[~high_mask]))) if np.any(~high_mask) else mae_moe
+
+        all_maes.append(mae_moe)
+        all_rmses.append(rmse_moe)
+        all_ws.append(w_moe)
+
+        fold_key = f'fold_{fold_num}'
+        fold_results[fold_key] = {
+            'train_start': str(train_frame['utc_time'].min()),
+            'train_end': str(train_frame['utc_time'].max()),
+            'prediction_start': str(pred_frame['utc_time'].min()),
+            'prediction_end': str(pred_frame['utc_time'].max()),
+            'train_rows': int(train_mask.sum()),
+            'pred_rows': int(pred_mask.sum()),
+            'best_epoch': epochs,
+            'mae_m': mae_moe,
+            'rmse_m': rmse_moe,
+            'mean_shapiro_w': w_moe,
+            'high_regime_mae_m': high_mae,
+            'normal_regime_mae_m': norm_mae,
+            'persistence_mae_m': mae_persist,
+            'persistence_rmse_m': rmse_persist,
+            'persistence_shapiro_w': w_persist,
+            'harmonic_ridge_mae_m': mae_ridge,
+            'harmonic_ridge_rmse_m': rmse_ridge,
+            'harmonic_ridge_shapiro_w': w_ridge,
         }
 
-    fold_results['aggregate'] = {
-        'mean_mae_m':     float(np.mean(all_maes)) if all_maes else float('nan'),
-        'mean_shapiro_w': float(np.mean(all_ws))   if all_ws   else float('nan'),
+        csv_rows.append({
+            'fold': fold_num,
+            'train_start': str(train_frame['utc_time'].min()),
+            'train_end': str(train_frame['utc_time'].max()),
+            'prediction_start': str(pred_frame['utc_time'].min()),
+            'prediction_end': str(pred_frame['utc_time'].max()),
+            'train_rows': int(train_mask.sum()),
+            'prediction_rows': int(pred_mask.sum()),
+            'best_epoch': epochs,
+            'MAE': mae_moe,
+            'RMSE': rmse_moe,
+            'Shapiro_W': w_moe,
+            'high_regime_MAE': high_mae,
+            'normal_regime_MAE': norm_mae,
+            'persistence_MAE': mae_persist,
+            'persistence_RMSE': rmse_persist,
+            'persistence_W': w_persist,
+            'ridge_MAE': mae_ridge,
+            'ridge_RMSE': rmse_ridge,
+            'ridge_W': w_ridge,
+        })
+
+    fold_results['summary'] = {
+        'mean_rolling_mae_m': float(np.mean(all_maes)) if all_maes else float('nan'),
+        'mean_rolling_rmse_m': float(np.mean(all_rmses)) if all_rmses else float('nan'),
+        'mean_rolling_w': float(np.mean(all_ws)) if all_ws else float('nan'),
+        'std_rolling_mae_m': float(np.std(all_maes, ddof=1)) if len(all_maes) > 1 else 0.0,
+        'std_rolling_rmse_m': float(np.std(all_rmses, ddof=1)) if len(all_rmses) > 1 else 0.0,
+        'std_rolling_w': float(np.std(all_ws, ddof=1)) if len(all_ws) > 1 else 0.0,
         'folds_completed': len(all_maes),
     }
-    return fold_results
+    return fold_results, csv_rows
 
 
 def predict_geo_gated_moe(
@@ -703,40 +945,56 @@ def predict_geo_gated_moe(
     max_epochs: int,
     output_dir: Path,
 ) -> tuple[dict[str, np.ndarray], dict[tuple[str, int], dict[str, Any]]]:
-    """GEO Gated MoE: dual expert heads gated by learned p_gate from GRU history."""
-    baselines: dict[str, Any] = {}
-    detectors: dict[str, dict[str, float]] = {}
-    delta_scalers: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+    """GEO Gated MoE: dual expert heads gated by learned p_gate from GRU history.
+    
+    Strictly eliminates validation and backtest leakage:
+    1. Early stopping / epoch selection uses a genuinely held-out Day-7 validation set.
+       Preprocessing, baseline, and scalers are fitted ONLY on Days 1-6.
+    2. After best_epoch is selected, trial model is discarded.
+       A fresh baseline, scaler, and detector are fitted on all 7 days, and a fresh
+       model is trained from scratch for best_epoch on all 7 days for Day-8 inference.
+    3. Rolling backtest independently fits and trains from scratch per fold.
+    """
+    # -------------------------------------------------------------------------
+    # PHASE 1: Validation Split for Early Stopping & Epoch Selection
+    # Fit trial state on Days 1-6 only; Day 7 is held-out validation.
+    # -------------------------------------------------------------------------
+    trial_train_data: dict[str, list] = {'hist': [], 'q': [], 'sid': [], 'target_d': [], 'target_r': []}
+    trial_val_data:   dict[str, list] = {'hist': [], 'q': [], 'sid': [], 'target_d': [], 'target_r': []}
+    trial_scalers: dict[str, tuple[np.ndarray, np.ndarray]] = {}
 
     for name, item in datasets.items():
         frame  = item['train']
         origin = item['origin']
-        base   = _fit_causal_baseline(frame, origin)
-        baselines[name]  = base
-        detectors[name]  = _fit_regime_detector(frame)
-        x_tr             = time_features(frame['utc_time'], origin)
-        base_preds        = base.predict(x_tr)
-        deltas            = frame[list(TARGETS)].to_numpy(dtype=float) - base_preds
-        c_d               = np.median(deltas, axis=0)
-        q25, q75          = np.quantile(deltas, [0.25, 0.75], axis=0)
-        s_d               = np.maximum((q75 - q25) / 1.349, 0.0001)
-        delta_scalers[name] = (c_d, s_d)
-
-    train_data: dict[str, list] = {'hist': [], 'q': [], 'sid': [], 'target_d': [], 'target_r': []}
-    val_data:   dict[str, list] = {'hist': [], 'q': [], 'sid': [], 'target_d': [], 'target_r': []}
-
-    for name, item in datasets.items():
-        frame  = item['train']
-        origin = item['origin']
-        c_d, s_d = delta_scalers[name]
         val_start = frame['utc_time'].max().floor('D')
-        td, vd = _build_geo_moe_examples(
-            frame, origin, item['series_index'],
-            baselines[name], detectors[name], c_d, s_d, val_start, oversample_high_amp=3,
+        train_sub = frame[frame['utc_time'] < val_start].reset_index(drop=True)
+        val_sub   = frame[frame['utc_time'] >= val_start].reset_index(drop=True)
+
+        assert train_sub['utc_time'].max() < val_sub['utc_time'].min(), "Lineage error in validation split"
+
+        # Fit trial state strictly on train_sub
+        trial_base = _fit_causal_baseline(train_sub, origin)
+        trial_det  = _fit_regime_detector(train_sub)
+        x_tr_sub   = time_features(train_sub['utc_time'], origin)
+        deltas_sub = train_sub[list(TARGETS)].to_numpy(dtype=float) - trial_base.predict(x_tr_sub)
+        c_d_sub    = np.median(deltas_sub, axis=0)
+        q25_sub, q75_sub = np.quantile(deltas_sub, [0.25, 0.75], axis=0)
+        s_d_sub    = np.maximum((q75_sub - q25_sub) / 1.349, 0.0001)
+        trial_scalers[name] = (c_d_sub, s_d_sub)
+
+        # Build train examples from train_sub only
+        td = _build_geo_moe_train_examples(
+            train_sub, origin, item['series_index'],
+            trial_base, trial_det, c_d_sub, s_d_sub, oversample_high_amp=3,
         )
-        for k in train_data:
-            train_data[k].extend(td[k])
-            val_data[k].extend(vd[k])
+        # Build val examples from val_sub referencing train_sub history only
+        vd = _build_geo_moe_val_examples(
+            val_sub, train_sub, origin, item['series_index'],
+            trial_base, trial_det, c_d_sub, s_d_sub,
+        )
+        for k in trial_train_data:
+            trial_train_data[k].extend(td[k])
+            trial_val_data[k].extend(vd[k])
 
     def to_tensors(d: dict[str, list]) -> tuple[torch.Tensor, ...]:
         return (
@@ -747,46 +1005,42 @@ def predict_geo_gated_moe(
             torch.as_tensor(np.array(d['target_r']), dtype=torch.float32),
         )
 
-
-    tr_tensors  = to_tensors(train_data)
-    val_tensors = to_tensors(val_data)
+    tr_tensors  = to_tensors(trial_train_data)
+    val_tensors = to_tensors(trial_val_data)
     history_dim, query_dim = tr_tensors[0].shape[-1], tr_tensors[1].shape[-1]
-
-    # Scale tensor for amplitude loss (physical units); use GEO scale
-    geo_s_d = delta_scalers['GEO'][1]
-    s_d_tensor = torch.as_tensor(geo_s_d, dtype=torch.float32, device=device)
+    geo_s_d_trial = trial_scalers['GEO'][1]
+    s_d_tensor_trial = torch.as_tensor(geo_s_d_trial, dtype=torch.float32, device=device)
 
     def make_model() -> GEOGatedMoEModel:
         return GEOGatedMoEModel(history_dim, query_dim, len(datasets)).to(device)
 
-    model = make_model()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=0.001, weight_decay=0.0001)
-
-    tr_loader  = DataLoader(TensorDataset(*tr_tensors),  batch_size=32, shuffle=True)
-    val_loader = DataLoader(TensorDataset(*val_tensors), batch_size=32, shuffle=False)
+    trial_model = make_model()
+    trial_opt   = torch.optim.AdamW(trial_model.parameters(), lr=0.001, weight_decay=0.0001)
+    tr_loader   = DataLoader(TensorDataset(*tr_tensors),  batch_size=32, shuffle=True)
+    val_loader  = DataLoader(TensorDataset(*val_tensors), batch_size=32, shuffle=False)
 
     best_val_loss = float('inf')
     best_epoch    = 1
     stale         = 0
 
     for epoch in range(1, max_epochs + 1):
-        model.train()
+        trial_model.train()
         for h, q, sid, td, tr in tr_loader:
             h, q   = h.to(device), q.to(device)
             sid    = sid.to(device)
             td, tr = td.to(device), tr.to(device)
-            optimizer.zero_grad(set_to_none=True)
-            pred_d, gate_logit, _ = model(h, q, sid)
-            loss = _geo_moe_loss(pred_d, td, gate_logit, tr, s_d_tensor)
+            trial_opt.zero_grad(set_to_none=True)
+            pred_d, gate_logit, _ = trial_model(h, q, sid)
+            loss = _geo_moe_loss(pred_d, td, gate_logit, tr, s_d_tensor_trial)
             loss.backward()
-            nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            optimizer.step()
+            nn.utils.clip_grad_norm_(trial_model.parameters(), 1.0)
+            trial_opt.step()
 
-        model.eval()
+        trial_model.eval()
         v_losses: list[float] = []
         with torch.no_grad():
             for h, q, sid, td, _ in val_loader:
-                pred_d, _, _ = model(h.to(device), q.to(device), sid.to(device))
+                pred_d, _, _ = trial_model(h.to(device), q.to(device), sid.to(device))
                 v_losses.append(
                     nn.functional.smooth_l1_loss(pred_d, td.to(device), beta=1.0).item()
                 )
@@ -800,37 +1054,80 @@ def predict_geo_gated_moe(
         if stale >= 25:
             break
 
-    # Retrain on all data for best_epoch
-    all_tensors = tuple(torch.cat([tr_tensors[i], val_tensors[i]], dim=0) for i in range(len(tr_tensors)))
-    all_loader  = DataLoader(TensorDataset(*all_tensors), batch_size=32, shuffle=True)
+    # Discard trial_model completely (do not reuse partially trained model)
+    del trial_model, trial_opt
+    best_epoch = max(best_epoch, 5)
+
+    # -------------------------------------------------------------------------
+    # PHASE 2: Fresh Retrain on Full 7-Day Data for best_epoch
+    # Fresh baseline, scaler, detector, and neural weights fitted on all 7 days.
+    # -------------------------------------------------------------------------
+    baselines: dict[str, Any] = {}
+    detectors: dict[str, dict[str, float]] = {}
+    delta_scalers: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+    full_train_data: dict[str, list] = {'hist': [], 'q': [], 'sid': [], 'target_d': [], 'target_r': []}
+
+    for name, item in datasets.items():
+        frame  = item['train']
+        origin = item['origin']
+        base   = _fit_causal_baseline(frame, origin)
+        baselines[name]  = base
+        detectors[name]  = _fit_regime_detector(frame)
+        x_tr             = time_features(frame['utc_time'], origin)
+        base_preds       = base.predict(x_tr)
+        deltas           = frame[list(TARGETS)].to_numpy(dtype=float) - base_preds
+        c_d              = np.median(deltas, axis=0)
+        q25, q75         = np.quantile(deltas, [0.25, 0.75], axis=0)
+        s_d              = np.maximum((q75 - q25) / 1.349, 0.0001)
+        delta_scalers[name] = (c_d, s_d)
+
+        td_full = _build_geo_moe_train_examples(
+            frame, origin, item['series_index'],
+            base, detectors[name], c_d, s_d, oversample_high_amp=3,
+        )
+        for k in full_train_data:
+            full_train_data[k].extend(td_full[k])
+
+    full_tensors = to_tensors(full_train_data)
+    full_loader  = DataLoader(TensorDataset(*full_tensors), batch_size=32, shuffle=True)
+    geo_s_d_full = delta_scalers['GEO'][1]
+    s_d_tensor_full = torch.as_tensor(geo_s_d_full, dtype=torch.float32, device=device)
+
     seed_everything(SEED)
     final_model = make_model()
-    final_optimizer = torch.optim.AdamW(final_model.parameters(), lr=0.001, weight_decay=0.0001)
+    final_opt   = torch.optim.AdamW(final_model.parameters(), lr=0.001, weight_decay=0.0001)
     final_model.train()
     for _ in range(best_epoch):
-        for h, q, sid, td, tr in all_loader:
+        for h, q, sid, td, tr in full_loader:
             h, q   = h.to(device), q.to(device)
             sid    = sid.to(device)
             td, tr = td.to(device), tr.to(device)
-            final_optimizer.zero_grad(set_to_none=True)
+            final_opt.zero_grad(set_to_none=True)
             pred_d, gate_logit, _ = final_model(h, q, sid)
-            loss = _geo_moe_loss(pred_d, td, gate_logit, tr, s_d_tensor)
+            loss = _geo_moe_loss(pred_d, td, gate_logit, tr, s_d_tensor_full)
             loss.backward()
             nn.utils.clip_grad_norm_(final_model.parameters(), 1.0)
-            final_optimizer.step()
+            final_opt.step()
     final_model.eval()
 
-    # Rolling backtest on GEO training data only — for architecture validation.
-    # Never uses Day-8 actuals.
+    # -------------------------------------------------------------------------
+    # PHASE 3: Independent Rolling Backtest on GEO Training Data Only
+    # Every fold is a completely independent causal experiment with fresh training.
+    # -------------------------------------------------------------------------
     geo_item = datasets['GEO']
-    backtest_results = _rolling_backtest_geo(
-        geo_item['train'], geo_item['origin'],
-        baselines['GEO'], detectors['GEO'],
-        delta_scalers['GEO'][0], delta_scalers['GEO'][1],
-        final_model, device,
+    backtest_results, csv_rows = _rolling_backtest_geo(
+        geo_item['train'], geo_item['origin'], device, epochs=best_epoch,
     )
-    print(f"  [GEO MoE Backtest] aggregate: MAE={backtest_results['aggregate']['mean_mae_m']:.4f}m  "
-          f"W={backtest_results['aggregate']['mean_shapiro_w']:.4f}")
+    print(f"  [GEO MoE Backtest] aggregate: MAE={backtest_results['summary']['mean_rolling_mae_m']:.4f}m  "
+          f"W={backtest_results['summary']['mean_rolling_w']:.4f}")
+
+    # Save rolling backtest reports to geo_diagnostics directory
+    geo_diag_dir = output_dir / 'geo_diagnostics'
+    geo_diag_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(csv_rows).to_csv(geo_diag_dir / 'geo_rolling_backtest.csv', index=False)
+    (geo_diag_dir / 'geo_rolling_backtest.json').write_text(
+        json.dumps(backtest_results, indent=2), encoding='utf-8'
+    )
 
     # Official Day-8 inference — strictly causal
     predictions: dict[str, np.ndarray] = {}
@@ -1106,7 +1403,7 @@ def generate_geo_diagnostics(
         'validation_rows': len(val_df),
         'selected_lookback_hours': 24,
         'max_history_rows': 32,
-        'candidate_lookbacks_evaluated': [6, 12, 24, 48, 72],
+        'candidate_lookbacks_evaluated': [24],
         'baseline_selected': 'Harmonic Ridge',
         'regime_anomaly_threshold_x0': float(train_dist['orbit_3d_norm']['p75']),
     }

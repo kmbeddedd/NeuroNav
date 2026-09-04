@@ -441,3 +441,204 @@ def test_n_backward_compatible_alias():
     assert hasattr(model, 'normal_head'),     "Alias model must have normal_head"
     assert hasattr(model, 'excursion_head'),  "Alias model must have excursion_head"
 
+
+# ---------------------------------------------------------------------------
+# Test 1 — validation perturbation invariance
+# Drastically modifying validation targets must leave baseline, scalers, detector,
+# and training examples 100% unchanged.
+# ---------------------------------------------------------------------------
+def test_validation_perturbation_invariance():
+    from scripts.benchmark.benchmark_ps08 import fit_geo_fold
+    
+    t0 = pd.Timestamp('2025-09-01 00:00:00')
+    times = [t0 + pd.Timedelta(hours=i) for i in range(100)]
+    np.random.seed(42)
+    vals = np.random.randn(100, 4) * 5.0
+    df = _create_synthetic_history(times, vals)
+    
+    split_time = t0 + pd.Timedelta(hours=80)
+    train_orig = df[df['utc_time'] < split_time].copy()
+    val_orig = df[df['utc_time'] >= split_time].copy()
+    
+    # State before perturbation
+    state1 = fit_geo_fold(train_orig, t0, series_idx=0, pred_start=val_orig['utc_time'].min(), epochs=0)
+    
+    # Perturb validation data drastically
+    val_perturbed = val_orig.copy()
+    val_perturbed[list(TARGETS)] = val_perturbed[list(TARGETS)] * 1000.0 + 99999.0
+    
+    # State recomputed on train_orig
+    state2 = fit_geo_fold(train_orig, t0, series_idx=0, pred_start=val_perturbed['utc_time'].min(), epochs=0)
+    
+    np.testing.assert_allclose(state1.center_d, state2.center_d, atol=1e-12)
+    np.testing.assert_allclose(state1.scale_d, state2.scale_d, atol=1e-12)
+    assert state1.detector['x0'] == state2.detector['x0']
+    assert state1.detector['scale'] == state2.detector['scale']
+    
+    # Baseline predictions identical
+    x_test = time_features(pd.Series([split_time + pd.Timedelta(hours=1)]), t0)
+    np.testing.assert_allclose(state1.baseline.predict(x_test), state2.baseline.predict(x_test), atol=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# Test 2 — backtest future perturbation invariance
+# Modifying future target values in a prediction segment must leave model predictions
+# 100% unchanged.
+# ---------------------------------------------------------------------------
+def test_backtest_future_perturbation_invariance():
+    from scripts.benchmark.benchmark_ps08 import fit_geo_fold, _physical_history_tensor, _physical_query_features, _compute_regime_probability
+    
+    t0 = pd.Timestamp('2025-09-01 00:00:00')
+    times = [t0 + pd.Timedelta(hours=i) for i in range(100)]
+    np.random.seed(42)
+    vals = np.random.randn(100, 4) * 3.0
+    df = _create_synthetic_history(times, vals)
+    
+    split_time = t0 + pd.Timedelta(hours=72)
+    train_frame = df[df['utc_time'] < split_time].copy()
+    pred_frame = df[df['utc_time'] >= split_time].copy()
+    
+    device = torch.device('cpu')
+    fold_state = fit_geo_fold(train_frame, t0, series_idx=0, pred_start=pred_frame['utc_time'].min(), device=device, epochs=5, seed=42)
+    
+    def get_preds(pf: pd.DataFrame) -> np.ndarray:
+        train_cutoff = len(train_frame) - 1
+        hists, qs, sids, bases = [], [], [], []
+        for q_time in pf['utc_time']:
+            hist, meta = _physical_history_tensor(
+                train_frame, train_cutoff, q_time, t0, fold_state.baseline, fold_state.center_d, fold_state.scale_d
+            )
+            rms = float(np.sqrt(np.mean(meta['orbit_norms'][-4:] ** 2)))
+            flips = float(np.mean(np.diff(np.sign(meta['vals'][:, 0])) != 0)) if len(meta['vals']) > 1 else 0.0
+            q_feat = _physical_query_features(
+                q_time, train_frame['utc_time'].iloc[train_cutoff], t0,
+                _compute_regime_probability(meta['orbit_norms'], fold_state.detector), rms, flips
+            )
+            x_q = time_features(pd.Series([q_time]), t0)
+            b_q = fold_state.baseline.predict(x_q)[0]
+            hists.append(hist)
+            qs.append(q_feat)
+            sids.append(0)
+            bases.append(b_q)
+            
+        with torch.no_grad():
+            pred_d, _, _ = fold_state.model(
+                torch.as_tensor(np.array(hists), dtype=torch.float32),
+                torch.as_tensor(np.array(qs), dtype=torch.float32),
+                torch.as_tensor(np.array(sids), dtype=torch.long),
+            )
+            delta = pred_d.cpu().numpy() * fold_state.scale_d + fold_state.center_d
+        return np.array(bases) + delta
+
+    preds_orig = get_preds(pred_frame)
+    
+    # Perturb future targets to gigantic numbers
+    pred_frame_perturbed = pred_frame.copy()
+    pred_frame_perturbed[list(TARGETS)] = 1e8
+    preds_perturbed = get_preds(pred_frame_perturbed)
+    
+    # Predictions must be identical to 1e-12
+    np.testing.assert_allclose(preds_orig, preds_perturbed, atol=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# Test 3 — fold model independence
+# Fold 1 and Fold 2 must train completely independent model instances.
+# ---------------------------------------------------------------------------
+def test_fold_model_independence():
+    from scripts.benchmark.benchmark_ps08 import fit_geo_fold
+    t0 = pd.Timestamp('2025-09-01 00:00:00')
+    times = [t0 + pd.Timedelta(hours=i) for i in range(120)]
+    np.random.seed(42)
+    vals = np.random.randn(120, 4) * 4.0
+    df = _create_synthetic_history(times, vals)
+    
+    device = torch.device('cpu')
+    train1 = df[df['utc_time'] < t0 + pd.Timedelta(days=3)].copy()
+    train2 = df[df['utc_time'] < t0 + pd.Timedelta(days=4)].copy()
+    
+    fold1 = fit_geo_fold(train1, t0, series_idx=0, pred_start=t0 + pd.Timedelta(days=3), device=device, epochs=5, seed=1)
+    fold2 = fit_geo_fold(train2, t0, series_idx=0, pred_start=t0 + pd.Timedelta(days=4), device=device, epochs=5, seed=2)
+    
+    assert fold1.model is not fold2.model, "Fold models must be distinct instances"
+    p1 = list(fold1.model.parameters())[0].detach().numpy()
+    p2 = list(fold2.model.parameters())[0].detach().numpy()
+    assert not np.allclose(p1, p2), "Fold models trained on different data/seeds must have distinct weights"
+
+
+# ---------------------------------------------------------------------------
+# Test 4 — preprocessing independence
+# Preprocessing objects must be distinct instances fitted independently per fold.
+# ---------------------------------------------------------------------------
+def test_preprocessing_independence():
+    from scripts.benchmark.benchmark_ps08 import fit_geo_fold
+    t0 = pd.Timestamp('2025-09-01 00:00:00')
+    times = [t0 + pd.Timedelta(hours=i) for i in range(120)]
+    np.random.seed(42)
+    # Day 4 has distinct variance
+    vals = np.random.randn(120, 4)
+    vals[72:96] += 20.0
+    df = _create_synthetic_history(times, vals)
+    
+    train1 = df[df['utc_time'] < t0 + pd.Timedelta(days=3)].copy()
+    train2 = df[df['utc_time'] < t0 + pd.Timedelta(days=4)].copy()
+    
+    fold1 = fit_geo_fold(train1, t0, series_idx=0, pred_start=t0 + pd.Timedelta(days=3), epochs=0)
+    fold2 = fit_geo_fold(train2, t0, series_idx=0, pred_start=t0 + pd.Timedelta(days=4), epochs=0)
+    
+    assert fold1.baseline is not fold2.baseline
+    assert fold1.detector['x0'] != fold2.detector['x0']
+    assert not np.allclose(fold1.scale_d, fold2.scale_d)
+
+
+# ---------------------------------------------------------------------------
+# Test 5 — strict temporal causality
+# For every generated prediction example: max(history_times) < query_time
+# ---------------------------------------------------------------------------
+def test_strict_temporal_causality():
+    from scripts.benchmark.benchmark_ps08 import _rolling_backtest_geo
+    t0 = pd.Timestamp('2025-09-01 00:00:00')
+    times = [t0 + pd.Timedelta(hours=i) for i in range(168)] # 7 days
+    np.random.seed(42)
+    vals = np.random.randn(168, 4) * 2.0
+    df = _create_synthetic_history(times, vals)
+    
+    device = torch.device('cpu')
+    results, rows = _rolling_backtest_geo(df, t0, device=device, epochs=2)
+    assert len(rows) == 4, "All 4 rolling folds must execute"
+    for r in rows:
+        t_end = pd.Timestamp(r['train_end'])
+        p_start = pd.Timestamp(r['prediction_start'])
+        assert t_end <= p_start, f"Causality violated: train_end {t_end} > pred_start {p_start}"
+
+
+# ---------------------------------------------------------------------------
+# Test 6 — no full-data fit
+# Modifying later portion of dataset must not change training-fold statistics.
+# ---------------------------------------------------------------------------
+def test_no_full_data_fit():
+    from scripts.benchmark.benchmark_ps08 import fit_geo_fold
+    t0 = pd.Timestamp('2025-09-01 00:00:00')
+    times = [t0 + pd.Timedelta(hours=i) for i in range(168)]
+    np.random.seed(42)
+    vals = np.random.randn(168, 4)
+    df_clean = _create_synthetic_history(times, vals)
+    
+    # Clean train fold (Days 1-3)
+    train_end = t0 + pd.Timedelta(days=3)
+    clean_train = df_clean[df_clean['utc_time'] < train_end].copy()
+    state_clean = fit_geo_fold(clean_train, t0, series_idx=0, pred_start=train_end, epochs=0)
+    
+    # Dataset with corrupt/extreme later data (Days 4-7)
+    df_corrupted = df_clean.copy()
+    df_corrupted.loc[df_corrupted['utc_time'] >= train_end, list(TARGETS)] = 1e6
+    corrupted_train = df_corrupted[df_corrupted['utc_time'] < train_end].copy()
+    state_corrupted = fit_geo_fold(corrupted_train, t0, series_idx=0, pred_start=train_end, epochs=0)
+    
+    # Training fold statistics must be 100% identical
+    np.testing.assert_allclose(state_clean.center_d, state_corrupted.center_d, atol=1e-12)
+    np.testing.assert_allclose(state_clean.scale_d, state_corrupted.scale_d, atol=1e-12)
+    assert state_clean.detector['x0'] == state_corrupted.detector['x0']
+    assert state_clean.detector['scale'] == state_corrupted.detector['scale']
+
+

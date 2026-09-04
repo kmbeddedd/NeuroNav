@@ -16,7 +16,7 @@ def main():
 Commands:
   gui         Launch the desktop application (Tkinter GUI or headless demo)
   predict     Run production model inference via NeuroNavModel
-  train       Train neural forecasting models (bilstm, transformer, orbitiq)
+  train       Train neural forecasting models (bilstm, transformer)
   evaluate    Evaluate models and baseline forecasters
   audit       Audit telemetry dataset against data contract
   benchmark   Run official PS-08 competition benchmark
@@ -39,7 +39,7 @@ Commands:
 
     # Command: train
     train_parser = subparsers.add_parser("train", help="Train a neural forecaster")
-    train_parser.add_argument("model", choices=["bilstm", "transformer", "orbitiq", "tune"])
+    train_parser.add_argument("model", choices=["bilstm", "transformer", "tune"])
     train_parser.add_argument("--data", default="data/benchmark/CLEAN_GNSS_BENCHMARK.csv")
     train_parser.add_argument("--epochs", type=int, default=30)
     train_parser.add_argument("--batch-size", type=int, default=32)
@@ -101,9 +101,6 @@ Commands:
         elif args.model == "transformer":
             from scripts.train.transformer import run_training
             run_training()
-        elif args.model == "orbitiq":
-            from scripts.train.orbitiq import main as run_orbitiq
-            run_orbitiq()
         elif args.model == "tune":
             from scripts.train.tune import run_tuning
             run_tuning()

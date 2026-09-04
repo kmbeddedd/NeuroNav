@@ -6,8 +6,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # Data Paths
 DEFAULT_DATA_PATH = str(PROJECT_ROOT / 'data' / 'benchmark' / 'CLEAN_GNSS_BENCHMARK.csv')
 SAMPLE_DATA_PATH = str(PROJECT_ROOT / 'data' / 'sample' / 'sample_gnss_data.csv')
-ORBITIQ_DATA_PATH = str(PROJECT_ROOT / 'data' / 'benchmark' / 'ORBITIQ_BENCHMARK.csv')
-ORBITIQ_OUTPUT_DIR = str(PROJECT_ROOT / 'models' / 'orbitiq_pipeline')
 DEFAULT_OUTPUT_DIR = str(PROJECT_ROOT / 'models' / 'deploy' / 'bilstm')
 
 # Scientific & Pipeline Constants

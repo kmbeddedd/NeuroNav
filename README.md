@@ -43,11 +43,10 @@ NeuroNav/
 │   ├── sample/                        # Representative sample dataset for GUI & smoke tests
 │   │   └── sample_gnss_data.csv
 │   └── benchmark/                     # Verified cleaned datasets for training/evaluation
-│       ├── CLEAN_GNSS_BENCHMARK.csv
-│       └── ORBITIQ_BENCHMARK.csv
+│       └── CLEAN_GNSS_BENCHMARK.csv
 │
 ├── scripts/                           # Orchestration CLI tools
-│   ├── train/                         # Training workflows (bilstm, transformer, orbitiq, tune)
+│   ├── train/                         # Training workflows (bilstm, transformer, tune)
 │   ├── evaluate/                      # Evaluation & comparison scripts
 │   ├── benchmark/                     # Official PS-08 competition benchmark runner
 │   └── data/                          # Data acquisition, IGS fetch, and audit scripts
