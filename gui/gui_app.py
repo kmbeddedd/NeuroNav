@@ -33,6 +33,26 @@ from app.controllers.inference_controller import InferenceController
 from src.calibration_engine import detect_satellite_col, detect_time_col
 from src.models.adapters import MODEL_ADAPTER_CLASSES, get_available_model_adapters
 
+
+def format_stat_p_val(val: Any) -> str:
+    """Format statistical p-value cleanly using scientific notation for small numbers.
+    
+    Prevents p-values such as 3.38e-6 from being rounded to a constant 0.000 while
+    preserving standard decimal representation for moderate values.
+    """
+    try:
+        if val is None or val == "":
+            return "—"
+        p_flt = float(val)
+        if p_flt <= 0.0:
+            return "0.0000"
+        if p_flt < 0.001:
+            return f"{p_flt:.4e}"
+        return f"{p_flt:.4f}"
+    except Exception:
+        return "1.0000"
+
+
 # -----------------------------------------------------------------------------
 # Stitch Design System (Modern Minimalist High Information Density)
 # -----------------------------------------------------------------------------
@@ -366,6 +386,9 @@ class NeuroNavApp(tk.Tk):
         if page_num == 1:
             self.page1.tkraise()
         elif page_num == 2:
+            self._refresh_p2_sat_dropdown()
+            if self.forecast_7day_path and self.forecast_7day_path.exists():
+                self._preview_forecast_routing(self.forecast_7day_path)
             self.page2.tkraise()
         else:
             self.page3.tkraise()
@@ -672,16 +695,40 @@ class NeuroNavApp(tk.Tk):
         tk.Label(tc, text="NEW 7-DAY DATASET INGESTION (NO GROUND TRUTH AVAILABLE)", font=FONT_SUBHEADING, fg=STITCH_THEME['fg_primary'], bg=STITCH_THEME['bg_surface']).pack(anchor='w', pady=(0, 6))
 
         in_row = tk.Frame(tc, bg=STITCH_THEME['bg_surface'])
-        in_row.pack(fill='x', pady=(0, 8))
+        in_row.pack(fill='x', pady=(0, 6))
 
         self.p2_data_path_var = tk.StringVar(value="")
         p2_e_wrap = tk.Frame(in_row, bg=STITCH_THEME['bg_input'], highlightbackground=STITCH_THEME['border'], highlightthickness=1)
         p2_e_wrap.pack(side='left', fill='x', expand=True, padx=(0, 8))
         tk.Entry(p2_e_wrap, textvariable=self.p2_data_path_var, font=FONT_BODY, bg=STITCH_THEME['bg_input'], fg=STITCH_THEME['fg_primary'], relief='flat', bd=0).pack(fill='x', expand=True, ipady=5, padx=6)
 
-        StitchButton(in_row, text="Browse New 7-Day...", command=self._browse_forecast_data_file, variant="secondary", width=160, height=34, radius=6).pack(side='left', padx=(0, 8))
+        StitchButton(in_row, text="Browse New 7-Day...", command=self._browse_forecast_data_file, variant="secondary", width=160, height=34, radius=6).pack(side='left')
 
-        self.run_fc_btn = StitchButton(in_row, text="⚡ Run 8th-Day Forecast", command=self._start_forecast, variant="accent", width=220, height=34, radius=6)
+        # Target Satellite Dropdown & Run Forecast Row
+        act_row = tk.Frame(tc, bg=STITCH_THEME['bg_surface'])
+        act_row.pack(fill='x', pady=(0, 8))
+
+        tk.Label(
+            act_row,
+            text="TARGET SATELLITE:",
+            font=FONT_BADGE,
+            fg=STITCH_THEME['fg_primary'],
+            bg=STITCH_THEME['bg_surface'],
+        ).pack(side='left', padx=(0, 8))
+
+        self.p2_selected_sat_var = tk.StringVar(value="(Auto-Detect)")
+        self.p2_sat_combo = ttk.Combobox(
+            act_row,
+            textvariable=self.p2_selected_sat_var,
+            values=["(Auto-Detect)"],
+            state='readonly',
+            font=FONT_BODY,
+            width=20,
+        )
+        self.p2_sat_combo.pack(side='left', padx=(0, 14))
+        self.p2_sat_combo.bind("<<ComboboxSelected>>", self._on_p2_sat_selected)
+
+        self.run_fc_btn = StitchButton(act_row, text="⚡ Run 8th-Day Forecast", command=self._start_forecast, variant="accent", width=220, height=34, radius=6)
         self.run_fc_btn.pack(side='left')
 
         # Dynamic Routing Summary Bar
@@ -959,9 +1006,10 @@ class NeuroNavApp(tk.Tk):
                 self.calibration_results.setdefault('satellites', {}).update(res.get('satellites', {}))
                 self.calibration_results.setdefault('comparison_matrix', {}).update(res.get('comparison_matrix', {}))
                 self.calibration_results['summary_path'] = res.get('summary_path', '')
-            self.after(0, lambda: self._on_calibration_finished(target_sat_name, res))
+            self.after(0, lambda s=target_sat_name, r=res: self._on_calibration_finished(s, r))
         except Exception as exc:
-            self.after(0, lambda: self._on_calibration_failed(str(exc)))
+            err_msg = str(exc)
+            self.after(0, lambda msg=err_msg: self._on_calibration_failed(msg))
 
     def _on_calibration_failed(self, err_msg: str) -> None:
         self.run_cal_btn.config_state('normal')
@@ -1233,6 +1281,19 @@ class NeuroNavApp(tk.Tk):
     # =========================================================================
     # EVENT HANDLERS: STAGE 2 FORECAST
     # =========================================================================
+    def _refresh_p2_sat_dropdown(self) -> None:
+        registered = self.controller.registry.get_all_satellites()
+        opts = ["(Auto-Detect)"] + registered
+        if hasattr(self, 'p2_sat_combo'):
+            self.p2_sat_combo['values'] = opts
+            cur = self.p2_selected_sat_var.get()
+            if cur not in opts:
+                self.p2_selected_sat_var.set("(Auto-Detect)")
+
+    def _on_p2_sat_selected(self, event=None) -> None:
+        if self.forecast_7day_path and self.forecast_7day_path.exists():
+            self._preview_forecast_routing(self.forecast_7day_path)
+
     def _browse_forecast_data_file(self) -> None:
         filetypes = [("CSV Files", "*.csv"), ("All Files", "*.*")]
         chosen = filedialog.askopenfilename(title="Select New 7-Day Dataset for Forecasting (CSV)", filetypes=filetypes)
@@ -1245,27 +1306,55 @@ class NeuroNavApp(tk.Tk):
         try:
             df = pd.read_csv(path)
             sat_col = detect_satellite_col(df)
-            if sat_col:
+            registered_sats = self.controller.registry.get_all_satellites()
+
+            selected_choice = self.p2_selected_sat_var.get().strip() if hasattr(self, 'p2_selected_sat_var') else ""
+            if selected_choice and not selected_choice.startswith("(") and selected_choice in registered_sats:
+                sats = [selected_choice]
+            elif sat_col:
                 sats = sorted(df[sat_col].astype(str).dropna().unique().tolist())
             else:
-                sats = ['SAT_GLOBAL']
+                # Infer from filename or registered satellites
+                stem = path.stem.upper()
+                inferred = None
+                for r_sat in registered_sats:
+                    clean_r = r_sat.upper().replace("-", "").replace("_", "")
+                    if r_sat.upper() in stem or any(part in stem for part in ("GEO", "MEO", "LEO", "GPS") if part in clean_r):
+                        inferred = r_sat
+                        break
+                if not inferred and len(registered_sats) == 1:
+                    inferred = registered_sats[0]
+
+                chosen = inferred or (registered_sats[0] if registered_sats else 'SAT_GLOBAL')
+                sats = [chosen]
+                # Auto-select matched satellite in combobox if currently auto-detect
+                if hasattr(self, 'p2_selected_sat_var') and (not self.p2_selected_sat_var.get() or self.p2_selected_sat_var.get().startswith("(")):
+                    if chosen in registered_sats:
+                        self.p2_selected_sat_var.set(chosen)
 
             routing_parts = []
+            has_uncalibrated = False
             for s in sats:
                 m_entry = self.controller.get_model_for_satellite(s)
-                if m_entry:
+                if m_entry and m_entry.get('selected_model'):
                     m_name = m_entry.get('selected_model')
                     mode = m_entry.get('selection_mode', 'auto')
                     routing_parts.append(f"{s} ➔ {m_name} ({mode})")
                 else:
                     routing_parts.append(f"{s} ➔ [NO_SELECTION: Calibrate First!]")
+                    has_uncalibrated = True
 
             summary_text = " · ".join(routing_parts[:6])
             if len(routing_parts) > 6:
                 summary_text += f" (+{len(routing_parts)-6} more)"
-            self.routing_summary_lbl.config(text=f"ACTIVE ROUTING: {summary_text}")
+
+            fg_col = STITCH_THEME['status_alert'] if has_uncalibrated else STITCH_THEME['status_nominal']
+            self.routing_summary_lbl.config(
+                text=f"ACTIVE ROUTING: {summary_text}",
+                fg=fg_col,
+            )
         except Exception as exc:
-            self.routing_summary_lbl.config(text=f"Error inspecting dataset: {exc}")
+            self.routing_summary_lbl.config(text=f"Error inspecting dataset: {exc}", fg=STITCH_THEME['status_alert'])
 
     def _start_forecast(self) -> None:
         if not self.forecast_7day_path or not self.forecast_7day_path.exists():
@@ -1275,16 +1364,24 @@ class NeuroNavApp(tk.Tk):
         self.run_fc_btn.config_state('disabled')
         self.run_fc_btn.set_text("Routing & Forecasting... ⏳")
 
-        thread = threading.Thread(target=self._run_forecast_thread, daemon=True)
+        target_sat = self.p2_selected_sat_var.get().strip() if hasattr(self, 'p2_selected_sat_var') else ""
+        if target_sat.startswith("(") or target_sat.lower() in ('auto', 'auto-detect', ''):
+            target_sat = None
+
+        thread = threading.Thread(target=self._run_forecast_thread, args=(target_sat,), daemon=True)
         thread.start()
 
-    def _run_forecast_thread(self) -> None:
+    def _run_forecast_thread(self, target_sat: Optional[str] = None) -> None:
         try:
-            preds_df = self.controller.predict_with_satellite_models(data=self.forecast_7day_path)
+            preds_df = self.controller.predict_with_satellite_models(
+                data=self.forecast_7day_path,
+                satellite_id=target_sat,
+            )
             self.forecast_results_df = preds_df
             self.after(0, self._on_forecast_finished)
         except Exception as exc:
-            self.after(0, lambda: self._on_forecast_failed(str(exc)))
+            err_msg = str(exc)
+            self.after(0, lambda msg=err_msg: self._on_forecast_failed(msg))
 
     def _on_forecast_failed(self, err_msg: str) -> None:
         self.run_fc_btn.config_state('normal')
@@ -1306,20 +1403,29 @@ class NeuroNavApp(tk.Tk):
             sat = str(row.get('satellite_id', row.get('Satellite_ID', '')))
             m_used = str(row.get('model_used', ''))
             mode = str(row.get('selection_mode', 'auto')).capitalize()
-            px = f"{row.get('predicted_X', row.get('pred_Error_X', 0.0)):.4f}"
-            py = f"{row.get('predicted_Y', row.get('pred_Error_Y', 0.0)):.4f}"
-            pz = f"{row.get('predicted_Z', row.get('pred_Error_Z', 0.0)):.4f}"
-            pclk = f"{row.get('predicted_Clock', row.get('pred_Error_Clock', 0.0)):.4f}"
-            p3d = f"{row.get('pred_3D_Orbit_Error', 0.0):.4f}"
+
+            def _fmt_val(val: Any) -> str:
+                try:
+                    if pd.notna(val):
+                        return f"{float(val):.4f}"
+                except Exception:
+                    pass
+                return "0.0000"
+
+            px = _fmt_val(row.get('predicted_X', row.get('pred_Error_X', 0.0)))
+            py = _fmt_val(row.get('predicted_Y', row.get('pred_Error_Y', 0.0)))
+            pz = _fmt_val(row.get('predicted_Z', row.get('pred_Error_Z', 0.0)))
+            pclk = _fmt_val(row.get('predicted_Clock', row.get('pred_Error_Clock', 0.0)))
+            p3d = _fmt_val(row.get('pred_3D_Orbit_Error', 0.0))
 
             tag = 'even' if idx % 2 == 0 else 'odd'
             self.pred_table.insert('', 'end', values=(idx + 1, t_str, sat, m_used, mode, px, py, pz, pclk, p3d), tags=(tag,))
 
         # Update P2 Banner
-        unique_sats = self.forecast_results_df['satellite_id'].unique()
-        models_used = self.forecast_results_df['model_used'].unique()
+        unique_sats = self.forecast_results_df['satellite_id'].unique() if 'satellite_id' in self.forecast_results_df.columns else []
+        models_used = self.forecast_results_df['model_used'].unique() if 'model_used' in self.forecast_results_df.columns else []
         self.p2_banner.config(
-            text=f"PREDICTED {len(self.forecast_results_df):,} EPOCHS · SATELLITES: {len(unique_sats)} · HETEROGENEOUS MODELS: {', '.join(models_used)}"
+            text=f"PREDICTED {len(self.forecast_results_df):,} EPOCHS · SATELLITES: {len(unique_sats)} · HETEROGENEOUS MODELS: {', '.join(str(m) for m in models_used)}"
         )
 
         messagebox.showinfo(
@@ -1454,14 +1560,19 @@ class NeuroNavApp(tk.Tk):
         targets = [("X Orbit Error", "X"), ("Y Orbit Error", "Y"), ("Z Orbit Error", "Z"), ("Clock Bias", "Clock")]
         for label, key in targets:
             tm = per_target.get(key, {})
-            w = f"{tm.get('shapiro_w', 1.0):.4f}"
-            p = f"{tm.get('shapiro_p', 1.0):.4f}"
-            bias = f"{tm.get('bias', 0.0):.4f}"
-            std = f"{tm.get('std', 0.0):.4f}"
-            mae = f"{tm.get('mae', 0.0):.4f}"
-            rmse = f"{tm.get('rmse', 0.0):.4f}"
-            r2 = f"{tm.get('r2', 0.0):.4f}"
-            max_ae = f"{tm.get('max_ae', 0.0):.4f}"
+            def _flt_fmt(val, default=0.0):
+                try:
+                    return f"{float(val):.4f}"
+                except Exception:
+                    return f"{default:.4f}"
+            w = _flt_fmt(tm.get('shapiro_w', 1.0), 1.0)
+            p = format_stat_p_val(tm.get('shapiro_p', 1.0))
+            bias = _flt_fmt(tm.get('bias', 0.0))
+            std = _flt_fmt(tm.get('std', 0.0))
+            mae = _flt_fmt(tm.get('mae', 0.0))
+            rmse = _flt_fmt(tm.get('rmse', 0.0))
+            r2 = _flt_fmt(tm.get('r2', 0.0))
+            max_ae = _flt_fmt(tm.get('max_ae', 0.0))
             self.shapiro_table.insert('', 'end', values=(label, w, p, bias, std, mae, rmse, r2, max_ae))
 
         # Render Matplotlib plots
@@ -1478,10 +1589,20 @@ class NeuroNavApp(tk.Tk):
         for idx, key in enumerate(target_keys):
             ax = self.axes.flat[idx]
             tm = per_target.get(key, {})
-            w_stat = tm.get('shapiro_w', 1.0)
+            try:
+                w_stat = float(tm.get('shapiro_w', 1.0))
+            except Exception:
+                w_stat = 1.0
             p_val = tm.get('shapiro_p', 1.0)
-            std_val = max(tm.get('std', 0.1), 1e-6)
-            bias_val = tm.get('bias', 0.0)
+            p_str = format_stat_p_val(p_val)
+            try:
+                std_val = max(float(tm.get('std', 0.1)), 1e-6)
+            except Exception:
+                std_val = 0.1
+            try:
+                bias_val = float(tm.get('bias', 0.0))
+            except Exception:
+                bias_val = 0.0
 
             # Retrieve exact empirical residuals if available, or generate model-consistent series
             raw_res = tm.get('residuals')
@@ -1496,7 +1617,7 @@ class NeuroNavApp(tk.Tk):
                 kde_x = np.linspace(min(residuals), max(residuals), 100)
                 kde_y = stats.norm.pdf(kde_x, loc=bias_val, scale=std_val)
                 ax.plot(kde_x, kde_y, color='#09090B', linewidth=1.5)
-                ax.set_title(f"{key} Residuals [{chosen_model}] W={w_stat:.4f}, p={p_val:.4f}", color=STITCH_THEME['fg_primary'], fontsize=10, fontweight='bold')
+                ax.set_title(f"{key} Residuals [{chosen_model}] W={w_stat:.4f}, p={p_str}", color=STITCH_THEME['fg_primary'], fontsize=10, fontweight='bold')
                 ax.set_ylabel("Probability Density", color=STITCH_THEME['fg_secondary'], fontsize=8)
             else:
                 (osm, osr), (slope, intercept, _) = stats.probplot(residuals, dist="norm")

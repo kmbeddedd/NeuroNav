@@ -36,6 +36,8 @@ Desktop.ini
 
 # Scratch runs; curated benchmark artifacts under results/ remain trackable
 results/local/
+reports/
+scratch/
 
 # Local agent configuration
 .agents/

@@ -426,6 +426,9 @@ def predict_satellite_heterogeneous(
             sat_col = candidate
             break
 
+    reg = registry or SatelliteModelRegistry()
+    registered_sats = reg.list_registered_satellites()
+
     if satellite_id and sat_col is None:
         df['Satellite_ID'] = str(satellite_id).strip()
         sat_col = 'Satellite_ID'
@@ -433,12 +436,23 @@ def predict_satellite_heterogeneous(
     elif sat_col is not None:
         all_sats = sorted([str(s) for s in df[sat_col].dropna().unique()])
     else:
-        all_sats = ['SAT_GLOBAL']
-        df['Satellite_ID'] = 'SAT_GLOBAL'
+        # Ingested dataset lacks a satellite column - infer from filename or registry
+        inferred = None
+        if isinstance(data, (str, Path)):
+            stem = Path(data).stem.upper()
+            for r_sat in registered_sats:
+                clean_r = r_sat.upper().replace("-", "").replace("_", "")
+                if r_sat.upper() in stem or any(part in stem for part in ("GEO", "MEO", "LEO", "GPS") if part in clean_r):
+                    inferred = r_sat
+                    break
+        if not inferred and len(registered_sats) == 1:
+            inferred = registered_sats[0]
+        chosen = inferred or (registered_sats[0] if registered_sats else 'SAT_GLOBAL')
+        all_sats = [chosen]
+        df['Satellite_ID'] = chosen
         sat_col = 'Satellite_ID'
 
     target_sats = [satellite_id] if satellite_id is not None else all_sats
-    reg = registry or SatelliteModelRegistry()
 
     forecast_frames: List[pd.DataFrame] = []
 
@@ -458,6 +472,13 @@ def predict_satellite_heterogeneous(
                 if fallback_model:
                     chosen_model = fallback_model
                     selection_mode = "fallback"
+                    adapter = get_adapter_by_id(chosen_model)
+                elif registered_sats:
+                    # Fallback to matched registered satellite if available
+                    matched = next((s for s in registered_sats if s.lower() in sat.lower() or sat.lower() in s.lower()), registered_sats[0])
+                    entry = reg.get_satellite_entry(matched)
+                    chosen_model = entry.get("selected_model", "persistence")
+                    selection_mode = f"mapped ({matched})"
                     adapter = get_adapter_by_id(chosen_model)
                 else:
                     raise ValueError(
@@ -508,6 +529,12 @@ def predict_satellite_heterogeneous(
         pred_df['predicted_Y'] = pred_df['pred_Error_Y']
         pred_df['predicted_Z'] = pred_df['pred_Error_Z']
         pred_df['predicted_Clock'] = pred_df['pred_Error_Clock']
+        if 'pred_3D_Orbit_Error' not in pred_df.columns:
+            pred_df['pred_3D_Orbit_Error'] = np.sqrt(
+                pred_df['pred_Error_X'].astype(float)**2 +
+                pred_df['pred_Error_Y'].astype(float)**2 +
+                pred_df['pred_Error_Z'].astype(float)**2
+            )
 
         forecast_frames.append(pred_df)
 

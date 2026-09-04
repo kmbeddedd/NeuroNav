@@ -1,0 +1,24 @@
+{
+  "model_name": "Persistence",
+  "model_type": "persistence",
+  "model_class": "PersistenceAdapter",
+  "version": "1.0.0",
+  "artifact_schema_version": 1,
+  "input_features": [
+    "Error_X",
+    "Error_Y",
+    "Error_Z",
+    "Error_Clock"
+  ],
+  "target_columns": [
+    "Error_X",
+    "Error_Y",
+    "Error_Z",
+    "Error_Clock"
+  ],
+  "sequence_length": 1,
+  "forecast_horizon": 96,
+  "cadence_minutes": 15,
+  "uncertainty_supported": false,
+  "description": "Deterministic persistence baseline holding the last observed satellite orbit and clock errors constant across the forecast horizon"
+}

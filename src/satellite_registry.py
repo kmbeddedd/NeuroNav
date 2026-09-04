@@ -11,7 +11,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from src.models.adapters import MODEL_ADAPTER_CLASSES, get_adapter_by_id
 
-DEFAULT_REGISTRY_PATH = Path("models/registry/satellite_model_registry.json")
+REPO_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_REGISTRY_PATH = REPO_ROOT / "models" / "registry" / "satellite_model_registry.json"
 
 
 class SatelliteModelRegistry:
@@ -78,6 +79,10 @@ class SatelliteModelRegistry:
     def get_all_satellites(self) -> List[str]:
         """Return list of all registered satellite IDs."""
         return sorted(list(self._data.get("satellites", {}).keys()))
+
+    def list_registered_satellites(self) -> List[str]:
+        """Alias for get_all_satellites."""
+        return self.get_all_satellites()
 
     def get_satellite_entry(self, satellite_id: str) -> Optional[Dict[str, Any]]:
         """Return full metadata dictionary for a satellite if it exists."""

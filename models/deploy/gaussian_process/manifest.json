@@ -1,0 +1,34 @@
+{
+  "model_name": "Gaussian-Process",
+  "model_type": "gaussian_process",
+  "model_class": "GaussianProcessAdapter",
+  "version": "1.0.0",
+  "artifact_schema_version": 1,
+  "input_features": [
+    "elapsed_days",
+    "elapsed_days_squared",
+    "phase_sin_1",
+    "phase_cos_1",
+    "phase_sin_2",
+    "phase_cos_2",
+    "phase_sin_3",
+    "phase_cos_3",
+    "phase_sin_4",
+    "phase_cos_4",
+    "phase_sin_5",
+    "phase_cos_5",
+    "phase_sin_6",
+    "phase_cos_6"
+  ],
+  "target_columns": [
+    "Error_X",
+    "Error_Y",
+    "Error_Z",
+    "Error_Clock"
+  ],
+  "sequence_length": 32,
+  "forecast_horizon": 96,
+  "cadence_minutes": 15,
+  "uncertainty_supported": true,
+  "description": "Non-parametric Gaussian Process regressor with composite RBF and White noise kernels for probabilistic orbit uncertainty quantification"
+}
