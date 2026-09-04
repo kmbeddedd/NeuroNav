@@ -219,7 +219,7 @@ class GNSSForecaster(nn.Module):
         self.prob_head = ProbabilisticGaussianHead(seq_feature_dim=seq_feature_dim, context_dim=context_dim, seq_len=seq_len, forecast_horizon=forecast_horizon, output_dim=output_dim, separate_orbit_clock_heads=separate_orbit_clock_heads)
         self.spike_head = AnomalySpikeBCEHead(context_dim=context_dim, forecast_horizon=forecast_horizon) if enable_event_head else None
 
-    def forward(self, x: torch.Tensor, sat_ids: torch.Tensor) -> tuple:
+    def forward(self, x: torch.Tensor, sat_ids: torch.Tensor, base_forecast: torch.Tensor | None = None) -> tuple:
         target_indices = list(self.target_feature_indices)
         target_history = x[:, :, target_indices]
         x_processed = x
@@ -231,8 +231,11 @@ class GNSSForecaster(nn.Module):
         mhsa_seq, context = self.backbone(x_processed, sat_ids, orbit_ids)
         spike_probs = self.spike_head(context) if self.spike_head is not None else context.new_zeros((context.shape[0], self.forecast_horizon))
         mu_delta, sigma = self.prob_head(mhsa_seq, context)
-        last_obs = x_processed[:, -1:, target_indices]
-        mu = last_obs + mu_delta
+        if base_forecast is not None:
+            mu = base_forecast + mu_delta
+        else:
+            last_obs = x_processed[:, -1:, target_indices]
+            mu = last_obs + mu_delta
         if self.use_revin:
             mu = self.revin(mu, mode='denorm')
             sigma = self.revin(sigma, mode='denorm_sigma')

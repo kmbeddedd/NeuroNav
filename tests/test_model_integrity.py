@@ -97,3 +97,38 @@ def test_dilate_loss_backward_gradient_flow():
     loss.backward()
     assert mu.grad is not None
     assert torch.isfinite(mu.grad).all()
+
+def test_spectral_fft_and_clock_acceleration_losses_backward_flow():
+    mu = torch.randn(2, 16, 4, requires_grad=True)
+    sigma = torch.ones_like(mu)
+    targets = torch.randn_like(mu)
+    loss = composite_transformer_loss(
+        mu, sigma, None, targets, None,
+        lambda_freq=0.1,
+        lambda_clock=0.1
+    )
+    assert torch.isfinite(loss)
+    loss.backward()
+    assert mu.grad is not None
+    assert torch.isfinite(mu.grad).all()
+
+def test_base_forecast_skip_integration():
+    from src.models.bilstm import BiLSTMGRUPyTorchModel
+    
+    # BiLSTM with base_forecast
+    bilstm = BiLSTMGRUPyTorchModel(seq_len=16, n_features=6, output_dim=4, target_feature_indices=(0, 1, 2, 3), forecast_horizon=8, separate_orbit_clock_heads=True)
+    x = torch.randn(2, 16, 6)
+    base = torch.full((2, 8, 4), 5.0)
+    out_with_base = bilstm(x, base_forecast=base)
+    out_default = bilstm(x)
+    assert out_with_base.shape == (2, 8, 4)
+    assert out_default.shape == (2, 8, 4)
+    
+    # Transformer with base_forecast
+    tf = GNSSForecaster(num_features=6, num_satellites=5, seq_len=16, forecast_horizon=8, output_dim=4, target_feature_indices=(0, 1, 2, 3), use_revin=False, separate_orbit_clock_heads=True)
+    sat_ids = torch.tensor([0, 1])
+    mu_with_base, sigma, _, _ = tf(x, sat_ids, base_forecast=base)
+    mu_default, _, _, _ = tf(x, sat_ids)
+    assert mu_with_base.shape == (2, 8, 4)
+    assert mu_default.shape == (2, 8, 4)
+

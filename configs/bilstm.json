@@ -9,7 +9,7 @@
   "gru_units": 64,
   "dropout_1": 0.2,
   "dropout_2": 0.1,
-  "separate_orbit_clock_heads": false,
+  "separate_orbit_clock_heads": true,
   "learning_rate": 0.001,
   "batch_size": 32,
   "epochs": 40

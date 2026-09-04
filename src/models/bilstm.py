@@ -32,7 +32,7 @@ class BiLSTMGRUPyTorchModel(nn.Module):
             self.clock_proj = None
             self.dense_proj = projection(self.output_dim)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, base_forecast: torch.Tensor | None = None) -> torch.Tensor:
         lstm_out, _ = self.bilstm(x)
         lstm_out = self.dropout1(lstm_out)
         gru_out, _ = self.gru(lstm_out)
@@ -49,8 +49,11 @@ class BiLSTMGRUPyTorchModel(nn.Module):
         else:
             delta = self.dense_proj(combined)
             delta = delta.view(-1, self.forecast_horizon, self.output_dim)
-        last_obs = x[:, -1:, list(self.target_feature_indices)]
-        out = last_obs + delta
+        if base_forecast is not None:
+            out = base_forecast + delta
+        else:
+            last_obs = x[:, -1:, list(self.target_feature_indices)]
+            out = last_obs + delta
         return out
 
 # Backward-compatible alias
