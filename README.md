@@ -20,6 +20,9 @@ The repository includes:
 
 ## 📌 Table of Contents
 
+- [System Architecture: GUI ⟷ ML Model Communication](#-system-architecture-gui--ml-model-communication)
+  - [Architecture Diagram](#-architecture-diagram)
+  - [Detailed Step-by-Step Data & Control Flow](#-detailed-step-by-step-data--control-flow)
 - [GUI Interface Walkthrough & User Guide](#-gui-interface-walkthrough--user-guide)
   - [How to Launch the GUI](#-how-to-launch-the-gui)
   - [Step-by-Step Procedure](#-step-by-step-procedure-of-the-gui-interface)
@@ -32,6 +35,138 @@ The repository includes:
 - [Deep-Learning & ML Architectures](#-deep-learning-and-ml-architectures)
 - [CLI Usage Guide](#-cli-usage-guide)
 - [Verification Status](#-verification-status)
+
+---
+
+## 🏗️ System Architecture: GUI ⟷ ML Model Communication
+
+NeuroNav is engineered with a clean, decoupled **3-tier architecture** that isolates the user interface from compute-heavy machine learning workflows:
+
+1. **Presentation Layer (`gui/gui_app.py`)**: High-density desktop interface built on Tkinter and embedded Matplotlib for interactive telemetry inspection, heterogeneous routing, and normality diagnostics.
+2. **Orchestration & State Management (`app/controllers/`, `src/satellite_registry.py`)**: Asynchronous controller (`InferenceController`) and persistent JSON-backed memory registry (`SatelliteModelRegistry`) preserving satellite-specific model selections.
+3. **Machine Learning & Statistical Core (`src/calibration_engine.py`, `src/inference.py`, `src/models/adapters.py`)**: Candidate model training, multi-target residual generation, Shapiro-Wilk testing, and heterogeneous inference pipelines.
+
+### 📐 Architecture Diagram
+
+```mermaid
+flowchart TD
+    %% Presentation Layer
+    subgraph GUI["🖥️ Presentation Layer (Desktop GUI - Tkinter & Matplotlib)"]
+        P1["Stage 1: Calibration View\n• 7-Day Train & 8th-Day Truth\n• Satellite Identifier Naming\n• Candidate Models Matrix"]
+        P2["Stage 2: Forecasting View\n• 7-Day Ingestion (No Truth)\n• Target Satellite Dropdown\n• Predicted Residuals Table"]
+        P3["Stage 3: Diagnostics View\n• Shapiro-Wilk Table (W, p-value)\n• Residual Histograms + KDE\n• Normal Q-Q Plots"]
+    end
+
+    %% Orchestration Layer
+    subgraph CTRL["⚙️ Orchestration & Threading Layer"]
+        Worker["Background Threading Worker\n(threading.Thread)"]
+        SafeDispatch["Safe Main-Thread Callback\n(self.after with closure binding)"]
+        IC["InferenceController\n(app/controllers/inference_controller.py)"]
+    end
+
+    %% Persistent Memory
+    subgraph MEM["💾 Persistent Satellite Memory"]
+        Reg["SatelliteModelRegistry\n(models/registry/satellite_model_registry.json)\n• Selected Model Winner\n• Selection Mode (Auto/Manual)\n• Multi-Target Validation Metrics\n• Shapiro-Wilk Scores"]
+    end
+
+    %% Core ML Pipeline
+    subgraph ML["🔬 Core ML Calibration & Inference Engines"]
+        CalibEngine["SatelliteCalibrationEngine\n(src/calibration_engine.py)\n• Multi-Model Parallel Fit\n• Residual Matrix Computation\n• Composite Score Calculation"]
+        InferEngine["predict_satellite_heterogeneous\n(src/inference.py)\n• Satellite ID Auto-Detection\n• Model Memory Lookup\n• 24h Horizon Forecast"]
+        StatNorm["Statistical Normality Module\n(scipy.stats.shapiro)\n• W Statistic & Exact p-Value"]
+    end
+
+    %% ML Adapters
+    subgraph ADAPT["🤖 Model Adapters (src/models/adapters.py)"]
+        HR["Harmonic Ridge\n(Diurnal Resonances)"]
+        LSTM["BiLSTM-GRU\n(Recurrent Bottleneck)"]
+        TF["Transformer\n(Self-Attention Network)"]
+        RF["Random Forest\n(Multi-Output Ensemble)"]
+        BASE["Persistence\n(Last-State Baseline)"]
+    end
+
+    %% Workflow 1: Stage 1 Calibration
+    P1 -->|"1. Start Calibration (paths, sat_name)"| Worker
+    Worker -->|"2. Invoke calibrate_satellite_models()"| IC
+    IC -->|"3. Dispatch calibration task"| CalibEngine
+    CalibEngine -->|"4. Fit & Predict candidate models"| ADAPT
+    ADAPT --> HR & LSTM & TF & RF & BASE
+    ADAPT -->|"5. Return predictions matrix"| CalibEngine
+    CalibEngine -->|"6. Calculate residuals & test normality"| StatNorm
+    StatNorm -->|"7. W & exact p-value (e.g. 3.38e-6)"| CalibEngine
+    CalibEngine -->|"8. Rank via Composite Score & save winner"| Reg
+    CalibEngine -->|"9. Return calibration summary"| IC
+    IC -->|"10. Dispatch result safely"| SafeDispatch
+    SafeDispatch -->|"11. Populate Memory & Candidate Tables"| P1
+    P1 -.->|"12. View error distributions"| P3
+
+    %% Workflow 2: Stage 2 Forecasting
+    P2 -->|"13. Run Forecast (test_data, target_sat)"| Worker
+    Worker -->|"14. Invoke predict_with_satellite_models()"| IC
+    IC -->|"15. Request heterogeneous forecast"| InferEngine
+    InferEngine -->|"16. Lookup satellite model from memory"| Reg
+    Reg -->|"17. Return calibrated model (e.g. GEO-01 ➔ persistence)"| InferEngine
+    InferEngine -->|"18. Fit historical context & forecast 24h horizon"| ADAPT
+    ADAPT -->|"19. Return predicted X, Y, Z, Clock & 3D Error"| InferEngine
+    InferEngine -->|"20. Return forecast dataframe"| IC
+    IC -->|"21. Dispatch predictions"| SafeDispatch
+    SafeDispatch -->|"22. Populate 96-epoch Prediction Table"| P2
+```
+
+---
+
+### 🔄 Detailed Step-by-Step Data & Control Flow
+
+The communication between the GUI and the ML model pipeline follows a strictly ordered, non-blocking sequence:
+
+```
+[GUI (Tkinter)] ───► [Thread Worker] ───► [InferenceController] ───► [ML Engine / Adapters]
+      ▲                                                                     │
+      │                                                                     ▼
+[GUI Update (self.after)] ◄─── [Safe Callback] ◄─── [Model Memory] ◄─── [Residuals & Shapiro Test]
+```
+
+#### Step 1: Ingestion & Satellite Configuration (GUI Presentation Layer)
+- **Action**: In **Stage 1**, the user loads a 7-day historical dataset and the corresponding 8th-day ground truth dataset, optionally entering a satellite identifier (e.g., `GEO-01`).
+- **Data Transferred**: File system paths (`Path`) and target satellite metadata string.
+
+#### Step 2: Non-Blocking Asynchronous Dispatch (Threading Layer)
+- **Action**: To prevent the Tkinter user interface from freezing during model training and matrix computations, the GUI spawns a dedicated worker thread via `threading.Thread(target=..., daemon=True)`.
+- **Function Called**: `InferenceController.calibrate_satellite_models(train_data, test_data, target_satellite_id)`.
+
+#### Step 3: Multi-Model Training & Cross-Evaluation (Zero-Leakage Engine)
+- **Action**: `SatelliteCalibrationEngine` loops over every registered model adapter (`HarmonicRidgeAdapter`, `BiLSTMGRUAdapter`, `TransformerAdapter`, `RandomForestAdapter`, `PersistenceAdapter`):
+  1. `adapter.fit(train_df)` trains exclusively on the historical 7-day data without test-set leakage.
+  2. `adapter.predict(train_df, horizon_steps=96)` forecasts the 24-hour Day-8 epoch sequence.
+- **Output**: Multi-target prediction matrices $[\hat{X}, \hat{Y}, \hat{Z}, \hat{\text{Clock}}]$ for each candidate model.
+
+#### Step 4: Residual Generation & Statistical Normality Testing
+- **Action**: The calibration engine computes signed residual errors against the actual 8th-day observations:
+  $$e_t = \hat{y}_t - y_t \quad \text{for } t \in \{1, \dots, 96\}$$
+- **Metrics Calculated**: Mean Absolute Error (MAE), Root Mean Squared Error (RMSE), Mean Bias, Standard Deviation, and $R^2$ Score.
+- **Normality Evaluation**: Calls `scipy.stats.shapiro` on the residuals to compute the exact **Shapiro-Wilk $W$ statistic** and empirical **$p$-value** (e.g., $3.3857 \times 10^{-6}$).
+
+#### Step 5: Composite Selection Scoring & Persistent Memory Write
+- **Action**: The engine evaluates the candidate models using the multi-objective Composite Selection Score:
+  $$\text{Score} = \frac{\bar{W}_{\text{Shapiro}}}{1.0 + \text{MAE}_{3D} + \text{MAE}_{\text{Clock\_norm}}}$$
+- **Persistence**: The top-ranked model (or user manual override) is saved to `models/registry/satellite_model_registry.json` via `SatelliteModelRegistry.save_calibration_result()`.
+
+#### Step 6: Safe Main-Thread Callback & Reactive UI Update
+- **Action**: Background thread safely marshals the results back to Tkinter using `self.after(0, lambda: ...)` with bound parameter closures.
+- **UI Update**: Populates the **Persistent Model Memory Table** and **Candidate Models Matrix**, displaying scores, MAE, RMSE, and Shapiro-Wilk $W$ values.
+
+#### Step 7: Heterogeneous Satellite-Specific Routing & Forecasting (Stage 2)
+- **Action**: In **Stage 2**, the user uploads a new 7-day dataset (where ground truth is unavailable):
+  1. The GUI previews routing: detects the satellite from column data, file name matching (e.g. `DATA_GEO_Test.csv` ➔ `GEO-01`), or the **Target Satellite** dropdown.
+  2. The inference engine routes each satellite to its own stored model from persistent memory via `predict_satellite_heterogeneous()`.
+  3. The model forecasts the 8th-day residual series and computes the composite 3D Orbit Error:
+     $$e_{3D} = \sqrt{\hat{X}^2 + \hat{Y}^2 + \hat{Z}^2}$$
+- **Result**: Renders the complete 96-row forecast table with UTC timestamps, satellite PRN, model used, and predicted orbit/clock offsets.
+
+#### Step 8: Diagnostics & Distribution Visualization (Stage 3)
+- **Action**: Transitioning to **Stage 3** dynamically loads the selected model's empirical evaluation:
+  1. Formats p-values in scientific notation (e.g., `3.3857e-06`) to accurately convey Gaussian probability without numerical truncation.
+  2. Renders interactive Matplotlib visuals (Residual Probability Histograms with KDE Gaussian curves and Normal Q-Q probability plots) for all four error components ($X, Y, Z, \text{Clock}$).
 
 ---
 
