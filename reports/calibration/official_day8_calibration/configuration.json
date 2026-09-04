@@ -1,0 +1,16 @@
+{
+  "primary_metric": "orbit_3d_vector_mae_m",
+  "candidate_models": [
+    "persistence",
+    "harmonic_ridge",
+    "random_forest",
+    "gaussian_process",
+    "geo_moe",
+    "bilstm_gru",
+    "transformer",
+    "decoupled_clock",
+    "nhits"
+  ],
+  "artifacts_dir": "models\\registry\\artifacts",
+  "reports_dir": "reports\\calibration"
+}

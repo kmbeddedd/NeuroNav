@@ -52,16 +52,17 @@ def run_headless_demo(controller: InferenceController, model_name: str, data_pat
 
 
 def launch_gui(controller: Optional[InferenceController] = None):
-    """Launch full 3-page NeuroNav Desktop GUI."""
+    """Launch Tkinter Desktop Mission Control GUI."""
     try:
         from gui.gui_app import NeuroNavApp
         app = NeuroNavApp()
         app.mainloop()
-    except Exception as e:
-        print(f"Tkinter GUI could not launch ({e}). Falling back to headless demo.")
-        if controller is None:
-            controller = InferenceController()
-        run_headless_demo(controller, 'bilstm', 'data/sample/sample_gnss_data.csv')
+    except Exception as exc:
+        print(f"Tkinter GUI could not be initialized ({exc}). Falling back to headless demo.")
+        ctrl = controller or InferenceController()
+        default_data = "data/DATA_GEO_Test.csv" if Path("data/DATA_GEO_Test.csv").exists() else "data/sample/sample_gnss_data.csv"
+        run_headless_demo(ctrl, 'bilstm', default_data)
+
 
 
 def main():

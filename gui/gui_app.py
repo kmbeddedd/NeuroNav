@@ -282,9 +282,6 @@ class NeuroNavApp(tk.Tk):
         # Core Backend Controller
         self.controller = InferenceController()
 
-        # Start with clean session: do not load or show preexisting values from previous runs
-        self.controller.clear_registry()
-
         # Calibration State (Stage 1)
         self.train_7day_path: Optional[Path] = None
         self.truth_8th_path: Optional[Path] = None
@@ -295,11 +292,13 @@ class NeuroNavApp(tk.Tk):
         self.selected_model_for_diagnostics: Optional[str] = None
         self.p1_selected_sat_var = tk.StringVar(value="")
         self.p1_sat_name_var = tk.StringVar(value="")
+        self.p1_orbit_type_var = tk.StringVar(value="GEO")
 
         # Forecast State (Stage 2)
         self.forecast_7day_path: Optional[Path] = None
         self.forecast_7day_df: Optional[pd.DataFrame] = None
         self.forecast_results_df: Optional[pd.DataFrame] = None
+        self.p2_epoch_search_var = tk.StringVar(value="")
 
         # Diagnostics State (Page 3)
         self.selected_satellite_for_plots = tk.StringVar(value="")
@@ -444,12 +443,47 @@ class NeuroNavApp(tk.Tk):
         tk.Label(s_row, text="e.g. GEO-01, MEO-02, PRN-05", font=FONT_SMALL, fg=STITCH_THEME['fg_muted'], bg=STITCH_THEME['bg_surface']).pack(side='right')
 
         s_input_group = tk.Frame(left, bg=STITCH_THEME['bg_surface'])
-        s_input_group.pack(fill='x', pady=(2, 8))
+        s_input_group.pack(fill='x', pady=(2, 6))
         sn_wrap = tk.Frame(s_input_group, bg=STITCH_THEME['bg_input'], highlightbackground=STITCH_THEME['border'], highlightthickness=1)
         sn_wrap.pack(side='left', fill='x', expand=True, padx=(0, 8))
         self.p1_sat_name_entry = tk.Entry(sn_wrap, textvariable=self.p1_sat_name_var, font=FONT_BODY, bg=STITCH_THEME['bg_input'], fg=STITCH_THEME['fg_primary'], relief='flat', bd=0)
         self.p1_sat_name_entry.pack(fill='x', expand=True, ipady=5, padx=6)
         StitchButton(s_input_group, text="Auto-Suggest 🏷", command=self._suggest_satellite_name, variant="secondary", width=130, height=32, radius=6).pack(side='left')
+
+        # Satellite Orbit Regime Radio Buttons (GEO / MEO)
+        orbit_row = tk.Frame(left, bg=STITCH_THEME['bg_surface'])
+        orbit_row.pack(fill='x', pady=(0, 8))
+        tk.Label(orbit_row, text="Orbit Constellation Type:", font=FONT_BADGE, fg=STITCH_THEME['fg_secondary'], bg=STITCH_THEME['bg_surface']).pack(side='left', padx=(0, 10))
+
+        self.r_geo = tk.Radiobutton(
+            orbit_row,
+            text="GEO (Geostationary)",
+            variable=self.p1_orbit_type_var,
+            value="GEO",
+            font=FONT_BODY_BOLD,
+            bg=STITCH_THEME['bg_surface'],
+            fg=STITCH_THEME['fg_primary'],
+            activebackground=STITCH_THEME['bg_surface'],
+            selectcolor=STITCH_THEME['bg_surface_alt'],
+            cursor='hand2',
+            command=self._on_orbit_radio_changed,
+        )
+        self.r_geo.pack(side='left', padx=(0, 16))
+
+        self.r_meo = tk.Radiobutton(
+            orbit_row,
+            text="MEO (Medium Earth Orbit)",
+            variable=self.p1_orbit_type_var,
+            value="MEO",
+            font=FONT_BODY_BOLD,
+            bg=STITCH_THEME['bg_surface'],
+            fg=STITCH_THEME['fg_primary'],
+            activebackground=STITCH_THEME['bg_surface'],
+            selectcolor=STITCH_THEME['bg_surface_alt'],
+            cursor='hand2',
+            command=self._on_orbit_radio_changed,
+        )
+        self.r_meo.pack(side='left')
 
         # 7-Day Historical Data File
         t_row = tk.Frame(left, bg=STITCH_THEME['bg_surface'])
@@ -552,21 +586,21 @@ class NeuroNavApp(tk.Tk):
         mem_table_wrap = tk.Frame(left, bg=STITCH_THEME['bg_surface'], highlightbackground=STITCH_THEME['border'], highlightthickness=1)
         mem_table_wrap.pack(fill='both', expand=True)
 
-        m_cols = ('sat_id', 'selected_model', 'score', 'mode', 'version', 'status')
+        m_cols = ('sat_id', 'orbit_type', 'selected_model', 'shapiro_w', 'mode', 'status')
         self.memory_table = ttk.Treeview(mem_table_wrap, columns=m_cols, show='headings', height=9)
         self.memory_table.heading('sat_id', text='SATELLITE')
+        self.memory_table.heading('orbit_type', text='ORBIT')
         self.memory_table.heading('selected_model', text='SELECTED MODEL')
-        self.memory_table.heading('score', text='SCORE')
+        self.memory_table.heading('shapiro_w', text='SHAPIRO W')
         self.memory_table.heading('mode', text='SELECTION MODE')
-        self.memory_table.heading('version', text='VERSION')
         self.memory_table.heading('status', text='AVAILABILITY')
 
-        self.memory_table.column('sat_id', width=90, anchor='center')
-        self.memory_table.column('selected_model', width=160, anchor='w')
-        self.memory_table.column('score', width=80, anchor='center')
+        self.memory_table.column('sat_id', width=85, anchor='center')
+        self.memory_table.column('orbit_type', width=65, anchor='center')
+        self.memory_table.column('selected_model', width=155, anchor='w')
+        self.memory_table.column('shapiro_w', width=85, anchor='center')
         self.memory_table.column('mode', width=110, anchor='center')
-        self.memory_table.column('version', width=80, anchor='center')
-        self.memory_table.column('status', width=120, anchor='center')
+        self.memory_table.column('status', width=90, anchor='center')
 
         self.memory_table.tag_configure('even', background=STITCH_THEME['table_even'])
         self.memory_table.tag_configure('odd', background=STITCH_THEME['table_odd'])
@@ -594,11 +628,22 @@ class NeuroNavApp(tk.Tk):
             text="Display Error Distribution 📊",
             command=self._display_error_distribution,
             variant="accent",
-            width=210,
+            width=200,
             height=32,
             radius=6,
         )
         self.btn_display_error_dist.pack(side='right')
+
+        self.btn_display_qq = StitchButton(
+            comp_hdr,
+            text="Q-Q Outliers (Priority 3) 📈",
+            command=self._display_qq_distribution,
+            variant="secondary",
+            width=195,
+            height=32,
+            radius=6,
+        )
+        self.btn_display_qq.pack(side='right', padx=(0, 8))
 
         self.detail_sub_hdr = tk.Label(right, text="Awaiting Calibration: Upload 7-day training & 8th-day ground truth datasets, then click 'Run Model Calibration'.", font=FONT_SMALL, fg=STITCH_THEME['fg_muted'], bg=STITCH_THEME['bg_surface'])
         self.detail_sub_hdr.pack(anchor='w', pady=(0, 4))
@@ -614,25 +659,29 @@ class NeuroNavApp(tk.Tk):
         )
         self.cand_selection_lbl.pack(anchor='w', pady=(0, 8))
 
-        # Comparison Matrix Table for Selected Satellite
+        # Comparison Matrix Table for Selected Satellite (PS-08 Priority 1 & 2)
         cand_wrap = tk.Frame(right, bg=STITCH_THEME['bg_surface'], highlightbackground=STITCH_THEME['border'], highlightthickness=1)
         cand_wrap.pack(fill='both', expand=True, pady=(0, 10))
 
-        c_cols = ('model', 'score', 'mae_3d', 'rmse_3d', 'mae_clk', 'shapiro_w')
+        c_cols = ('model', 'shapiro_w', 'p_value', 'h0_test', 'res_mean', 'res_std', 'mae_3d', 'mae_clk')
         self.cand_table = ttk.Treeview(cand_wrap, columns=c_cols, show='headings', height=7)
         self.cand_table.heading('model', text='CANDIDATE MODEL')
-        self.cand_table.heading('score', text='SCORE')
-        self.cand_table.heading('mae_3d', text='3D MAE (M)')
-        self.cand_table.heading('rmse_3d', text='3D RMSE (M)')
-        self.cand_table.heading('mae_clk', text='CLOCK MAE (M)')
         self.cand_table.heading('shapiro_w', text='SHAPIRO W')
+        self.cand_table.heading('p_value', text='P-VALUE')
+        self.cand_table.heading('h0_test', text='H0 (α=0.05)')
+        self.cand_table.heading('res_mean', text='RES MEAN (M)')
+        self.cand_table.heading('res_std', text='RES STD (M)')
+        self.cand_table.heading('mae_3d', text='3D MAE (M)')
+        self.cand_table.heading('mae_clk', text='CLOCK MAE (M)')
 
         self.cand_table.column('model', width=130, anchor='w')
-        self.cand_table.column('score', width=65, anchor='center')
+        self.cand_table.column('shapiro_w', width=80, anchor='center')
+        self.cand_table.column('p_value', width=90, anchor='center')
+        self.cand_table.column('h0_test', width=80, anchor='center')
+        self.cand_table.column('res_mean', width=85, anchor='e')
+        self.cand_table.column('res_std', width=80, anchor='e')
         self.cand_table.column('mae_3d', width=80, anchor='e')
-        self.cand_table.column('rmse_3d', width=85, anchor='e')
-        self.cand_table.column('mae_clk', width=95, anchor='e')
-        self.cand_table.column('shapiro_w', width=75, anchor='center')
+        self.cand_table.column('mae_clk', width=85, anchor='e')
 
         self.cand_table.tag_configure('winner', background='#ECFDF5', foreground='#065F46')
         self.cand_table.tag_configure('even', background=STITCH_THEME['table_even'])
@@ -748,34 +797,107 @@ class NeuroNavApp(tk.Tk):
         pred_card.pack(fill='both', expand=True)
         pred = pred_card.inner_frame
 
-        tk.Label(pred, text="PREDICTED SATELLITE RESIDUAL SERIES (HETEROGENEOUS MODEL OUTPUT)", font=FONT_HEADING, fg=STITCH_THEME['fg_primary'], bg=STITCH_THEME['bg_surface']).pack(anchor='w', pady=(0, 8))
+        tk.Label(pred, text="STAGE 2 ERROR OUTPUT TABLE & TIME-SERIES INSPECTOR (ML MODEL OUTPUT)", font=FONT_HEADING, fg=STITCH_THEME['fg_primary'], bg=STITCH_THEME['bg_surface']).pack(anchor='w', pady=(0, 2))
+        tk.Label(pred, text="Enter an arbitrary timestamp to compute and inspect instantaneous orbit and clock error predictions from the ML model.", font=FONT_SMALL, fg=STITCH_THEME['fg_muted'], bg=STITCH_THEME['bg_surface']).pack(anchor='w', pady=(0, 6))
 
+        # Search & Inspection Controls Bar
+        search_box = tk.Frame(pred, bg=STITCH_THEME['bg_surface_alt'], padx=10, pady=6)
+        search_box.pack(fill='x', pady=(0, 6))
+
+        tk.Label(
+            search_box,
+            text="ENTER ARBITRARY TIMESTAMP:",
+            font=FONT_BADGE,
+            fg=STITCH_THEME['fg_primary'],
+            bg=STITCH_THEME['bg_surface_alt'],
+        ).pack(side='left', padx=(0, 8))
+
+        self.p2_epoch_combo = ttk.Combobox(
+            search_box,
+            textvariable=self.p2_epoch_search_var,
+            values=[],
+            font=(FONT_MONO, 10),
+            width=20,
+        )
+        self.p2_epoch_combo.pack(side='left', padx=(0, 8))
+        self.p2_epoch_combo.bind("<<ComboboxSelected>>", self._on_p2_epoch_selected)
+        self.p2_epoch_combo.bind("<Return>", self._on_p2_epoch_selected)
+
+        StitchButton(
+            search_box,
+            text="Predict Error ⚡",
+            command=self._on_p2_epoch_selected,
+            variant="primary",
+            width=150,
+            height=28,
+            radius=4,
+        ).pack(side='left', padx=(0, 12))
+
+        # Active Timestamp Error Value Inspector Card
+        self.p2_inspector_frame = tk.Frame(pred, bg=STITCH_THEME['bg_surface'], highlightbackground=STITCH_THEME['border'], highlightthickness=1, padx=10, pady=8)
+        self.p2_inspector_frame.pack(fill='x', pady=(0, 8))
+
+        self.p2_insp_summary_lbl = tk.Label(
+            self.p2_inspector_frame,
+            text="Awaiting Arbitrary Timestamp: Enter a time above to inspect instantaneous ML error values.",
+            font=FONT_BADGE,
+            fg=STITCH_THEME['fg_muted'],
+            bg=STITCH_THEME['bg_surface'],
+        )
+        self.p2_insp_summary_lbl.pack(anchor='w', pady=(0, 4))
+
+        self.p2_badges_container = tk.Frame(self.p2_inspector_frame, bg=STITCH_THEME['bg_surface'])
+        self.p2_badges_container.pack(fill='x')
+
+        self.p2_badge_labels: Dict[str, tk.Label] = {}
+        badge_specs = [
+            ('time', 'TIME (UTC)', '—'),
+            ('sat', 'SATELLITE', '—'),
+            ('orbit', 'ORBIT', '—'),
+            ('model', 'MODEL USED', '—'),
+            ('err_x', 'ERROR X (M)', '—'),
+            ('err_y', 'ERROR Y (M)', '—'),
+            ('err_z', 'ERROR Z (M)', '—'),
+            ('err_clk', 'CLOCK ERROR (M)', '—'),
+            ('err_3d', '3D ORBIT ERROR (M)', '—'),
+        ]
+        for col_i, (b_key, b_title, b_init) in enumerate(badge_specs):
+            b_box = tk.Frame(self.p2_badges_container, bg=STITCH_THEME['bg_surface_alt'], padx=6, pady=4, highlightbackground=STITCH_THEME['border'], highlightthickness=1)
+            b_box.pack(side='left', fill='x', expand=True, padx=2)
+            tk.Label(b_box, text=b_title, font=(FONT_UI, 8, "bold"), fg=STITCH_THEME['fg_secondary'], bg=STITCH_THEME['bg_surface_alt']).pack(anchor='w')
+            val_lbl = tk.Label(b_box, text=b_init, font=(FONT_MONO, 10, "bold"), fg=STITCH_THEME['fg_primary'], bg=STITCH_THEME['bg_surface_alt'])
+            val_lbl.pack(anchor='w')
+            self.p2_badge_labels[b_key] = val_lbl
+
+        # Output Table for Error from ML Model
         pred_table_wrap = tk.Frame(pred, bg=STITCH_THEME['bg_surface'], highlightbackground=STITCH_THEME['border'], highlightthickness=1)
         pred_table_wrap.pack(fill='both', expand=True)
 
-        p_cols = ('row_idx', 'utc_time', 'sat_id', 'model_used', 'mode', 'pred_x', 'pred_y', 'pred_z', 'pred_clk', 'pred_3d')
+        p_cols = ('row_idx', 'utc_time', 'sat_id', 'orbit_type', 'model_used', 'mode', 'pred_x', 'pred_y', 'pred_z', 'pred_clk', 'pred_3d')
         self.pred_table = ttk.Treeview(pred_table_wrap, columns=p_cols, show='headings', style='Pred.Treeview')
         self.pred_table.heading('row_idx', text='#')
-        self.pred_table.heading('utc_time', text='UTC FORECAST EPOCH')
+        self.pred_table.heading('utc_time', text='UTC FORECAST TIME')
         self.pred_table.heading('sat_id', text='SATELLITE')
+        self.pred_table.heading('orbit_type', text='ORBIT')
         self.pred_table.heading('model_used', text='MODEL USED')
         self.pred_table.heading('mode', text='MODE')
-        self.pred_table.heading('pred_x', text='PRED X (M)')
-        self.pred_table.heading('pred_y', text='PRED Y (M)')
-        self.pred_table.heading('pred_z', text='PRED Z (M)')
-        self.pred_table.heading('pred_clk', text='PRED CLOCK (M)')
+        self.pred_table.heading('pred_x', text='ERROR X (M)')
+        self.pred_table.heading('pred_y', text='ERROR Y (M)')
+        self.pred_table.heading('pred_z', text='ERROR Z (M)')
+        self.pred_table.heading('pred_clk', text='CLOCK ERROR (M)')
         self.pred_table.heading('pred_3d', text='3D ORBIT ERROR (M)')
 
         self.pred_table.column('row_idx', width=45, anchor='center')
         self.pred_table.column('utc_time', width=155, anchor='center')
-        self.pred_table.column('sat_id', width=90, anchor='center')
-        self.pred_table.column('model_used', width=130, anchor='w')
-        self.pred_table.column('mode', width=95, anchor='center')
-        self.pred_table.column('pred_x', width=115, anchor='e')
-        self.pred_table.column('pred_y', width=115, anchor='e')
-        self.pred_table.column('pred_z', width=115, anchor='e')
-        self.pred_table.column('pred_clk', width=125, anchor='e')
-        self.pred_table.column('pred_3d', width=135, anchor='e')
+        self.pred_table.column('sat_id', width=85, anchor='center')
+        self.pred_table.column('orbit_type', width=65, anchor='center')
+        self.pred_table.column('model_used', width=125, anchor='w')
+        self.pred_table.column('mode', width=85, anchor='center')
+        self.pred_table.column('pred_x', width=105, anchor='e')
+        self.pred_table.column('pred_y', width=105, anchor='e')
+        self.pred_table.column('pred_z', width=105, anchor='e')
+        self.pred_table.column('pred_clk', width=115, anchor='e')
+        self.pred_table.column('pred_3d', width=125, anchor='e')
 
         self.pred_table.tag_configure('even', background=STITCH_THEME['table_even'], foreground=STITCH_THEME['fg_primary'])
         self.pred_table.tag_configure('odd', background=STITCH_THEME['table_odd'], foreground=STITCH_THEME['fg_primary'])
@@ -787,6 +909,7 @@ class NeuroNavApp(tk.Tk):
         pv_scroll.pack(side='right', fill='y')
         ph_scroll.pack(side='bottom', fill='x')
         self.pred_table.pack(side='left', fill='both', expand=True)
+        self.pred_table.bind('<<TreeviewSelect>>', self._on_p2_table_row_selected)
 
     # =========================================================================
     # STAGE 3: Statistical Residual Analysis & Normality Diagnostics
@@ -828,12 +951,13 @@ class NeuroNavApp(tk.Tk):
         sh_table_wrap = tk.Frame(stat, bg=STITCH_THEME['bg_surface'], highlightbackground=STITCH_THEME['border'], highlightthickness=1)
         sh_table_wrap.pack(fill='x')
 
-        sh_cols = ('target', 'w_stat', 'p_val', 'bias', 'std', 'mae', 'rmse', 'r2', 'max_ae')
-        self.shapiro_table = ttk.Treeview(sh_table_wrap, columns=sh_cols, show='headings', height=4)
+        sh_cols = ('target', 'w_stat', 'p_val', 'h0_res', 'bias', 'std', 'mae', 'rmse', 'r2', 'max_ae')
+        self.shapiro_table = ttk.Treeview(sh_table_wrap, columns=sh_cols, show='headings', height=5)
         self.shapiro_table.heading('target', text='TARGET')
         self.shapiro_table.heading('w_stat', text='SHAPIRO W')
         self.shapiro_table.heading('p_val', text='P-VALUE')
-        self.shapiro_table.heading('bias', text='BIAS (M)')
+        self.shapiro_table.heading('h0_res', text='H0 (α=0.05)')
+        self.shapiro_table.heading('bias', text='BIAS / MEAN (M)')
         self.shapiro_table.heading('std', text='STD DEV (M)')
         self.shapiro_table.heading('mae', text='MAE (M)')
         self.shapiro_table.heading('rmse', text='RMSE (M)')
@@ -910,8 +1034,10 @@ class NeuroNavApp(tk.Tk):
                 stem = self.train_7day_path.stem.upper()
                 if "GEO" in stem:
                     base = "GEO"
+                    self.p1_orbit_type_var.set("GEO")
                 elif "MEO" in stem:
                     base = "MEO"
+                    self.p1_orbit_type_var.set("MEO")
                 elif "LEO" in stem:
                     base = "LEO"
                 elif "PRN" in stem:
@@ -920,8 +1046,9 @@ class NeuroNavApp(tk.Tk):
                     base = "IRNSS"
                 elif "GPS" in stem:
                     base = "GPS"
+                    self.p1_orbit_type_var.set("MEO")
                 else:
-                    base = "SAT"
+                    base = self.p1_orbit_type_var.get().strip().upper() or "GEO"
 
                 # Find next available index not in existing
                 for i in range(1, 100):
@@ -932,8 +1059,9 @@ class NeuroNavApp(tk.Tk):
 
         # Fallback if no file or default
         if not suggested:
+            base = self.p1_orbit_type_var.get().strip().upper() or "GEO"
             for i in range(1, 100):
-                cand = f"SAT-{i:02d}"
+                cand = f"{base}-{i:02d}"
                 if cand not in existing:
                     suggested = cand
                     break
@@ -941,10 +1069,24 @@ class NeuroNavApp(tk.Tk):
         if suggested:
             self.p1_sat_name_var.set(suggested)
 
+    def _on_orbit_radio_changed(self) -> None:
+        """Handle toggle of GEO / MEO radio buttons to assist satellite naming."""
+        orbit = self.p1_orbit_type_var.get().strip().upper() or "GEO"
+        current_name = self.p1_sat_name_var.get().strip()
+        # If no name or it's a default generated name (GEO-XX, MEO-XX, SAT-XX), update to match chosen orbit
+        if not current_name or any(current_name.startswith(p) for p in ("GEO-", "MEO-", "SAT-")):
+            existing = set(self.controller.get_all_satellite_memories().keys())
+            base = orbit
+            for i in range(1, 100):
+                cand = f"{base}-{i:02d}"
+                if cand not in existing:
+                    self.p1_sat_name_var.set(cand)
+                    break
+
     def _suggest_next_satellite_name(self, just_registered: Optional[str] = None) -> None:
         """Suggest the next satellite identifier after a calibration run."""
         existing = set(self.controller.get_all_satellite_memories().keys())
-        base = "SAT"
+        base = self.p1_orbit_type_var.get().strip().upper() or "GEO"
         if just_registered:
             parts = just_registered.rsplit("-", 1)
             if len(parts) == 2 and parts[1].isdigit():
@@ -962,8 +1104,15 @@ class NeuroNavApp(tk.Tk):
         if chosen:
             self.train_7day_path = Path(chosen)
             self.p1_train_path_var.set(str(chosen))
-            if not self.p1_sat_name_var.get().strip():
-                self._suggest_satellite_name()
+            # Reset current calibration UI and candidate ranking table so old results do not appear for new data
+            self.calibration_results = None
+            self.selected_satellite_for_detail = None
+            self.cand_table.delete(*self.cand_table.get_children())
+            self.detail_sat_hdr.config(text="SATELLITE DETAIL & COMPARISON")
+            self.detail_sub_hdr.config(text="● New Dataset Selected: Click '⚡ Run Model Calibration & Evaluation Across Satellites' to run ML model evaluation.")
+            self.cand_selection_lbl.config(text="Awaiting Calibration: Run calibration to evaluate and rank all candidate ML models on this dataset.", fg=STITCH_THEME['fg_primary'])
+            self.cal_status_lbl.config(text="● DATASET READY: Click '⚡ Run Model Calibration & Evaluation Across Satellites'", fg=STITCH_THEME['fg_primary'])
+            self._suggest_satellite_name()
 
     def _browse_truth_file(self) -> None:
         filetypes = [("CSV Files", "*.csv"), ("All Files", "*.*")]
@@ -971,6 +1120,13 @@ class NeuroNavApp(tk.Tk):
         if chosen:
             self.truth_8th_path = Path(chosen)
             self.p1_truth_path_var.set(str(chosen))
+            # Clear old candidate ranking results when a new ground truth file is provided
+            self.calibration_results = None
+            self.cand_table.delete(*self.cand_table.get_children())
+            self.detail_sat_hdr.config(text="SATELLITE DETAIL & COMPARISON")
+            self.detail_sub_hdr.config(text="● Ground Truth Selected: Click '⚡ Run Model Calibration & Evaluation Across Satellites' to evaluate.")
+            self.cal_status_lbl.config(text="● DATASET READY: Click '⚡ Run Model Calibration & Evaluation Across Satellites'", fg=STITCH_THEME['fg_primary'])
+
 
     def _start_calibration(self) -> None:
         if not self.train_7day_path or not self.train_7day_path.exists():
@@ -981,24 +1137,26 @@ class NeuroNavApp(tk.Tk):
             return
 
         sat_name = self.p1_sat_name_var.get().strip() or None
+        orbit_type = self.p1_orbit_type_var.get().strip().upper() or "GEO"
 
         self.run_cal_btn.config_state('disabled')
-        display_name = f"for '{sat_name}' " if sat_name else ""
+        display_name = f"for '{sat_name}' [{orbit_type}] " if sat_name else f"[{orbit_type}] "
         self.run_cal_btn.set_text(f"Evaluating Models {display_name}... ⏳")
         self.cal_status_lbl.config(
             text=f"● CALIBRATING: Evaluating candidate models {display_name}(Zero Leakage)...",
             fg=STITCH_THEME['fg_primary']
         )
 
-        thread = threading.Thread(target=self._run_calibration_thread, args=(sat_name,), daemon=True)
+        thread = threading.Thread(target=self._run_calibration_thread, args=(sat_name, orbit_type), daemon=True)
         thread.start()
 
-    def _run_calibration_thread(self, target_sat_name: Optional[str] = None) -> None:
+    def _run_calibration_thread(self, target_sat_name: Optional[str] = None, orbit_type: str = "GEO") -> None:
         try:
             res = self.controller.calibrate_satellite_models(
                 train_data=self.train_7day_path,
                 test_data=self.truth_8th_path,
                 target_satellite_id=target_sat_name,
+                orbit_type=orbit_type,
             )
             if self.calibration_results is None:
                 self.calibration_results = res
@@ -1060,16 +1218,16 @@ class NeuroNavApp(tk.Tk):
 
         for idx, sat_id in enumerate(sat_list):
             entry = memories[sat_id]
+            orbit_type = str(entry.get('orbit_type', 'GEO')).upper()
             sel_model = entry.get('selected_model', 'NO_SELECTION')
-            score = f"{entry.get('score', 0.0):.4f}"
+            shapiro_w = f"{entry.get('shapiro_w', entry.get('score', 0.0)):.4f}"
             mode = entry.get('selection_mode', 'automatic').capitalize()
-            ver = entry.get('model_version', '1.0.0')
 
             is_avail, _ = self.controller.registry.verify_model_availability(sat_id)
             status = "Ready" if is_avail else "Missing"
 
             tag = 'even' if idx % 2 == 0 else 'odd'
-            self.memory_table.insert('', 'end', iid=sat_id, values=(sat_id, sel_model, score, mode, ver, status), tags=(tag,))
+            self.memory_table.insert('', 'end', iid=sat_id, values=(sat_id, orbit_type, sel_model, shapiro_w, mode, status), tags=(tag,))
 
         # Update dropdown selection if valid or default to first
         current = self.p1_selected_sat_var.get()
@@ -1123,24 +1281,42 @@ class NeuroNavApp(tk.Tk):
 
         sel_model = entry.get('selected_model')
         mode = entry.get('selection_mode', 'automatic')
-        self.detail_sub_hdr.config(text=f"Current Active: {sel_model} ({mode.capitalize()}) · Score: {entry.get('score', 0.0):.4f}")
+        sh_w_best = entry.get('shapiro_w', entry.get('score', 0.0))
+        orbit_type = entry.get('orbit_type', 'GEO')
+        self.detail_sub_hdr.config(
+            text=f"Active: {sel_model} ({mode.capitalize()}) · Orbit: {orbit_type} · Shapiro-Wilk W: {float(sh_w_best):.4f}"
+        )
 
         # Populate candidate comparison table
         self.cand_table.delete(*self.cand_table.get_children())
         candidates = entry.get('candidate_models', {})
         v_metrics = entry.get('validation_metrics', {})
 
-        # Sort candidates by score descending
-        sorted_cands = sorted(candidates.items(), key=lambda x: x[1], reverse=True)
+        # Priority 1: Sort candidates by Shapiro W descending
+        # Priority 2: Residual mean ascending, residual std ascending, 3D MAE ascending
+        def get_model_sort_key(item):
+            m_id = item[0]
+            m_metrics = v_metrics.get(m_id, {})
+            w = float(m_metrics.get('shapiro_w_mean', item[1] if isinstance(item[1], (int, float)) else 0.0))
+            b = float(m_metrics.get('mean_res_mean', 9999.0))
+            s = float(m_metrics.get('std_res_mean', 9999.0))
+            mae = float(m_metrics.get('mae_3d', 999999.0))
+            return (-w, b, s, mae)
+
+        sorted_cands = sorted(candidates.items(), key=get_model_sort_key)
         for idx, (m_id, sc) in enumerate(sorted_cands):
             m_metrics = v_metrics.get(m_id, {})
             mae_3d = f"{m_metrics.get('mae_3d', 0.0):.4f}" if 'mae_3d' in m_metrics else "—"
-            rmse_3d = f"{m_metrics.get('rmse_3d', 0.0):.4f}" if 'rmse_3d' in m_metrics else "—"
             mae_clk = f"{m_metrics.get('mae_clock', 0.0):.4f}" if 'mae_clock' in m_metrics else "—"
-            sh_w = f"{m_metrics.get('shapiro_w_mean', 1.0):.4f}" if 'shapiro_w_mean' in m_metrics else "—"
+            sh_w = f"{m_metrics.get('shapiro_w_mean', sc if isinstance(sc, (int, float)) else 1.0):.4f}"
+            sh_p = format_stat_p_val(m_metrics.get('shapiro_p_mean', m_metrics.get('shapiro_p_val', None)))
+            h0_val = m_metrics.get('h0_result_mean', 0 if float(m_metrics.get('shapiro_p_mean', 1.0)) >= 0.05 else 1)
+            h0_str = f"{h0_val} (Normal)" if h0_val == 0 else f"{h0_val} (Reject)"
+            res_m = f"{m_metrics.get('mean_res_mean', 0.0):.4f}" if 'mean_res_mean' in m_metrics else "—"
+            res_s = f"{m_metrics.get('std_res_mean', 0.0):.4f}" if 'std_res_mean' in m_metrics else "—"
 
             tag = 'winner' if m_id == sel_model else ('even' if idx % 2 == 0 else 'odd')
-            self.cand_table.insert('', 'end', iid=m_id, values=(m_id, f"{sc:.4f}", mae_3d, rmse_3d, mae_clk, sh_w), tags=(tag,))
+            self.cand_table.insert('', 'end', iid=m_id, values=(m_id, sh_w, sh_p, h0_str, res_m, res_s, mae_3d, mae_clk), tags=(tag,))
 
         # Target candidate model defaults to current winner or first candidate
         target_model = sel_model if sel_model in candidates else (sorted_cands[0][0] if sorted_cands else None)
@@ -1240,22 +1416,81 @@ class NeuroNavApp(tk.Tk):
     def _goto_page3_for_selected_sat(self) -> None:
         self._display_error_distribution()
 
+    def _display_qq_distribution(self) -> None:
+        """Navigate to Page 3 and activate Q-Q Normal Plot mode (PS-08 Priority 3)."""
+        self._set_plot_mode("Q-Q Normal Plot (Quantile-Quantile)")
+        self._display_error_distribution()
+
     def _clear_session_memory(self) -> None:
         """Wipe all satellite model memories and reset GUI to clean state."""
         if messagebox.askyesno("Clear Model Memory", "Are you sure you want to clear all satellite model memories and reset to a clean slate?"):
+            # 1. Clear backend registry and controller cache
             self.controller.clear_registry()
+
+            # 2. Reset Stage 1 state
             self.calibration_results = None
             self.train_7day_path = None
             self.truth_8th_path = None
+            self.train_7day_df = None
+            self.truth_8th_df = None
+            self.selected_satellite_for_detail = None
+            self.selected_model_for_diagnostics = None
             self.p1_train_path_var.set("")
             self.p1_truth_path_var.set("")
             self.p1_sat_name_var.set("")
+            self.p1_selected_sat_var.set("")
+            self.p1_orbit_type_var.set("GEO")
+            self.cand_table.delete(*self.cand_table.get_children())
+            self.memory_table.delete(*self.memory_table.get_children())
+            self.mem_count_badge.config(text="0 SATELLITES REGISTERED")
+            self.detail_sat_hdr.config(text="SATELLITE DETAIL & COMPARISON")
+            self.detail_sub_hdr.config(text="Awaiting Calibration: Upload 7-day training & 8th-day ground truth datasets, then click 'Run Model Calibration'.")
+            self.cand_selection_lbl.config(
+                text="No candidate models evaluated yet · Upload datasets to begin",
+                fg=STITCH_THEME['fg_muted'],
+            )
+            self.override_choice.set("")
+            if hasattr(self, 'p1_sat_combo'):
+                self.p1_sat_combo['values'] = []
             self.cal_status_lbl.config(
                 text="● ENGINE IDLE: Select 7-day training and 8th-day ground truth datasets",
                 fg=STITCH_THEME['fg_muted'],
             )
+
+            # 3. Reset Stage 2 state
+            self.forecast_7day_path = None
+            self.forecast_7day_df = None
+            self.forecast_results_df = None
+            self.p2_data_path_var.set("")
+            self.p2_selected_sat_var.set("(Auto-Detect)")
+            self.p2_epoch_search_var.set("")
+            if hasattr(self, 'p2_sat_combo'):
+                self.p2_sat_combo['values'] = ["(Auto-Detect)"]
+            if hasattr(self, 'p2_epoch_combo'):
+                self.p2_epoch_combo['values'] = []
+            if hasattr(self, 'pred_table'):
+                self.pred_table.delete(*self.pred_table.get_children())
+            if hasattr(self, 'routing_summary_lbl'):
+                self.routing_summary_lbl.config(
+                    text="Awaiting Dataset: Upload a dataset to inspect satellite routing.",
+                    fg=STITCH_THEME['fg_muted'],
+                )
+            if hasattr(self, 'p2_insp_summary_lbl'):
+                self.p2_insp_summary_lbl.config(
+                    text="Awaiting Arbitrary Timestamp: Enter a time above to inspect instantaneous ML error values.",
+                    fg=STITCH_THEME['fg_muted'],
+                )
+            if hasattr(self, 'p2_badge_labels'):
+                for lbl in self.p2_badge_labels.values():
+                    lbl.config(text="—")
+
+            # 4. Reset Stage 3 state
+            self._reset_page3_diagnostics()
+
+            # 5. Refresh table views
             self._refresh_satellite_memory_table()
-            messagebox.showinfo("Memory Reset", "Satellite model memory has been cleared.")
+            messagebox.showinfo("Memory Reset", "All satellite model memories and dataset selections have been cleared.")
+
 
     def _reset_page3_diagnostics(self) -> None:
         """Reset Page 3 tables and plots to clean placeholder state."""
@@ -1300,6 +1535,23 @@ class NeuroNavApp(tk.Tk):
         if chosen:
             self.forecast_7day_path = Path(chosen)
             self.p2_data_path_var.set(str(chosen))
+            # Reset satellite selection to auto-detect so it does not hold onto previous dataset's satellite
+            self.p2_selected_sat_var.set("(Auto-Detect)")
+            # Clear previous forecast output table and inspector card so previous results don't linger
+            self.forecast_results_df = None
+            if hasattr(self, 'pred_table'):
+                self.pred_table.delete(*self.pred_table.get_children())
+            if hasattr(self, 'p2_epoch_combo'):
+                self.p2_epoch_combo['values'] = []
+            self.p2_epoch_search_var.set("")
+            if hasattr(self, 'p2_insp_summary_lbl'):
+                self.p2_insp_summary_lbl.config(
+                    text="● NEW DATASET LOADED: Click '⚡ Run 8th-Day Forecast' to generate predictions.",
+                    fg=STITCH_THEME['fg_primary'],
+                )
+            if hasattr(self, 'p2_badge_labels'):
+                for lbl in self.p2_badge_labels.values():
+                    lbl.config(text="—")
             self._preview_forecast_routing(Path(chosen))
 
     def _preview_forecast_routing(self, path: Path) -> None:
@@ -1396,11 +1648,16 @@ class NeuroNavApp(tk.Tk):
             messagebox.showwarning("No Results", "Forecast completed but returned no records.")
             return
 
-        # Populate Prediction Treeview
+        # Populate Prediction Treeview and collect timestamps
         self.pred_table.delete(*self.pred_table.get_children())
+        epoch_values: List[str] = []
         for idx, row in self.forecast_results_df.iterrows():
             t_str = str(row.get('timestamp', row.get('utc_time', row.get('forecast_time', ''))))
             sat = str(row.get('satellite_id', row.get('Satellite_ID', '')))
+            orbit = str(row.get('orbit_type', '')).upper()
+            if not orbit or orbit == 'NAN':
+                m_mem = self.controller.get_model_for_satellite(sat)
+                orbit = m_mem.get('orbit_type', 'GEO') if m_mem else 'GEO'
             m_used = str(row.get('model_used', ''))
             mode = str(row.get('selection_mode', 'auto')).capitalize()
 
@@ -1419,7 +1676,23 @@ class NeuroNavApp(tk.Tk):
             p3d = _fmt_val(row.get('pred_3D_Orbit_Error', 0.0))
 
             tag = 'even' if idx % 2 == 0 else 'odd'
-            self.pred_table.insert('', 'end', values=(idx + 1, t_str, sat, m_used, mode, px, py, pz, pclk, p3d), tags=(tag,))
+            row_iid = f"row_{idx}"
+            self.pred_table.insert(
+                '',
+                'end',
+                iid=row_iid,
+                values=(idx + 1, t_str, sat, orbit, m_used, mode, px, py, pz, pclk, p3d),
+                tags=(tag,),
+            )
+            epoch_values.append(t_str)
+
+        # Update Epoch Search Combobox
+        self.p2_epoch_combo['values'] = []
+        if not self.forecast_results_df.empty:
+            self._display_selected_epoch_error(0)
+            if "row_0" in self.pred_table.get_children():
+                self.pred_table.selection_set("row_0")
+                self.pred_table.see("row_0")
 
         # Update P2 Banner
         unique_sats = self.forecast_results_df['satellite_id'].unique() if 'satellite_id' in self.forecast_results_df.columns else []
@@ -1430,8 +1703,301 @@ class NeuroNavApp(tk.Tk):
 
         messagebox.showinfo(
             "Forecast Complete",
-            f"Generated 8th-day predictions for {len(unique_sats)} satellite(s) using individual calibrated models."
+            f"Generated 8th-day predictions for {len(unique_sats)} satellite(s) using individual calibrated models.\n\n"
+            f"Enter any arbitrary timestamp in the panel above the Error Output Table "
+            f"to compute and inspect instantaneous ML error values."
         )
+
+    def _display_selected_epoch_error(self, row_idx: int) -> None:
+        """Update active timestamp error inspector badges for the specified row index."""
+        if self.forecast_results_df is None or self.forecast_results_df.empty:
+            return
+        if row_idx < 0 or row_idx >= len(self.forecast_results_df):
+            return
+
+        row = self.forecast_results_df.iloc[row_idx]
+        t_str = str(row.get('timestamp', row.get('utc_time', row.get('forecast_time', '—'))))
+        sat = str(row.get('satellite_id', row.get('Satellite_ID', '—')))
+        orbit = str(row.get('orbit_type', '')).upper()
+        if not orbit or orbit == 'NAN':
+            m_mem = self.controller.get_model_for_satellite(sat)
+            orbit = m_mem.get('orbit_type', 'GEO') if m_mem else 'GEO'
+        m_used = str(row.get('model_used', '—'))
+
+        def _fmt_err(val: Any) -> str:
+            try:
+                if pd.notna(val):
+                    return f"{float(val):.4f}"
+            except Exception:
+                pass
+            return "0.0000"
+
+        err_x = _fmt_err(row.get('predicted_X', row.get('pred_Error_X', 0.0)))
+        err_y = _fmt_err(row.get('predicted_Y', row.get('pred_Error_Y', 0.0)))
+        err_z = _fmt_err(row.get('predicted_Z', row.get('pred_Error_Z', 0.0)))
+        err_clk = _fmt_err(row.get('predicted_Clock', row.get('pred_Error_Clock', 0.0)))
+        err_3d = _fmt_err(row.get('pred_3D_Orbit_Error', 0.0))
+
+        # Extract clean time without date, month, or year
+        clean_time = t_str.replace("[Arbitrary]", "").strip()
+        if ' ' in clean_time and '-' in clean_time.split()[0]:
+            clean_time = clean_time.split()[1]
+
+        if hasattr(self, 'p2_badge_labels'):
+            if 'time' in self.p2_badge_labels:
+                self.p2_badge_labels['time'].config(text=clean_time)
+            if 'sat' in self.p2_badge_labels:
+                self.p2_badge_labels['sat'].config(text=sat)
+            if 'orbit' in self.p2_badge_labels:
+                self.p2_badge_labels['orbit'].config(text=orbit)
+            if 'model' in self.p2_badge_labels:
+                self.p2_badge_labels['model'].config(text=m_used)
+            if 'err_x' in self.p2_badge_labels:
+                self.p2_badge_labels['err_x'].config(text=f"{err_x} m")
+            if 'err_y' in self.p2_badge_labels:
+                self.p2_badge_labels['err_y'].config(text=f"{err_y} m")
+            if 'err_z' in self.p2_badge_labels:
+                self.p2_badge_labels['err_z'].config(text=f"{err_z} m")
+            if 'err_clk' in self.p2_badge_labels:
+                self.p2_badge_labels['err_clk'].config(text=f"{err_clk} m")
+            if 'err_3d' in self.p2_badge_labels:
+                self.p2_badge_labels['err_3d'].config(text=f"{err_3d} m")
+
+        if hasattr(self, 'p2_insp_summary_lbl'):
+            self.p2_insp_summary_lbl.config(
+                text=f"INSTANTANEOUS ML OUTPUT ERROR VALUES — TIME: {clean_time} ({sat} · {orbit} · Model: {m_used})",
+                fg=STITCH_THEME['fg_primary'],
+            )
+
+    def _parse_arbitrary_time_to_dt(self, raw_str: str) -> Optional[pd.Timestamp]:
+        """Convert arbitrary user time (e.g. '14:30:00' or '2025-09-09 14:30:00') to full Timestamp.
+        Automatically anchors time-only inputs to the 8th forecast day without requiring date/month/year."""
+        s = raw_str.replace("[Arbitrary]", "").strip()
+        if not s:
+            return None
+
+        # Determine reference date for the 8th forecast day
+        ref_date = None
+        if self.forecast_results_df is not None and not self.forecast_results_df.empty:
+            for col in ('timestamp', 'utc_time', 'forecast_time'):
+                if col in self.forecast_results_df.columns:
+                    try:
+                        ref_date = pd.to_datetime(self.forecast_results_df[col].iloc[0]).strftime('%Y-%m-%d')
+                        break
+                    except Exception:
+                        pass
+
+        if not ref_date:
+            data_source = self.forecast_7day_path or self.train_7day_path
+            if data_source and Path(data_source).exists():
+                try:
+                    df_sample = pd.read_csv(data_source, nrows=5000)
+                    for col in ('utc_time', 'timestamp', 'Timestamp', 'time'):
+                        if col in df_sample.columns:
+                            t_max = pd.to_datetime(df_sample[col].dropna()).max()
+                            ref_date = (t_max + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+                            break
+                except Exception:
+                    pass
+
+        if not ref_date:
+            ref_date = "2025-09-09"
+
+        # If pure time string (e.g. "14:30:00" or "14:30"), prepend ref_date
+        if '-' not in s and '/' not in s:
+            try:
+                parsed_time = pd.to_datetime(s).strftime('%H:%M:%S')
+                return pd.to_datetime(f"{ref_date} {parsed_time}")
+            except Exception:
+                try:
+                    return pd.to_datetime(f"{ref_date} {s}")
+                except Exception:
+                    return None
+
+        # Full datetime string with date provided
+        try:
+            return pd.to_datetime(s)
+        except Exception:
+            return None
+
+    def _on_p2_epoch_selected(self, event=None) -> None:
+        """Handler when user enters an arbitrary timestamp to compute error."""
+        selected_time = self.p2_epoch_search_var.get().strip()
+        if not selected_time:
+            return
+
+        # Case 1: Match against already forecasted/loaded epochs in the table
+        match_idx = None
+        if self.forecast_results_df is not None and not self.forecast_results_df.empty:
+            for idx, row in self.forecast_results_df.iterrows():
+                t_str = str(row.get('timestamp', row.get('utc_time', row.get('forecast_time', '')))).strip()
+                if t_str == selected_time:
+                    match_idx = idx
+                    break
+                if ' ' in t_str:
+                    time_part = t_str.split()[1]
+                    if time_part == selected_time or time_part.startswith(selected_time):
+                        match_idx = idx
+                        break
+
+        if match_idx is not None:
+            iid = f"row_{match_idx}"
+            if iid in self.pred_table.get_children():
+                self.pred_table.selection_set(iid)
+                self.pred_table.see(iid)
+            self._display_selected_epoch_error(match_idx)
+            return
+
+        # Case 2: ARBITRARY TIMESTAMP PREDICTION USING ML MODEL
+        target_dt = self._parse_arbitrary_time_to_dt(selected_time)
+        if target_dt is None:
+            messagebox.showwarning(
+                "Invalid Timestamp Format",
+                f"Could not parse '{selected_time}' as a valid time.\n\n"
+                f"Please enter an arbitrary timestamp (e.g. 14:30:00 or 14:30)."
+            )
+            return
+
+        # Determine 7-day historical telemetry source for fitting/conditioning
+        data_source = self.forecast_7day_path or self.train_7day_path
+        if not data_source or not Path(data_source).exists():
+            messagebox.showwarning(
+                "Telemetry Dataset Required",
+                "To predict at an arbitrary timestamp, please select a 7-day telemetry dataset first "
+                "so the ML model can condition on historical ephemeris."
+            )
+            return
+
+        target_sat = self.p2_selected_sat_var.get().strip() if hasattr(self, 'p2_selected_sat_var') else ""
+        if target_sat.startswith("(") or target_sat.lower() in ('auto', 'auto-detect', ''):
+            target_sat = None
+
+        # Predict instantaneously at the arbitrary timestamp using active satellite model
+        try:
+            arb_df = self.controller.predict_with_satellite_models(
+                data=data_source,
+                satellite_id=target_sat,
+                target_times=[target_dt],
+            )
+        except Exception as exc:
+            messagebox.showerror(
+                "Arbitrary Prediction Error",
+                f"Failed to generate prediction at '{selected_time}':\n\n{str(exc)}"
+            )
+            return
+
+        if arb_df is None or arb_df.empty:
+            messagebox.showwarning("No Output", f"Model produced no prediction for '{selected_time}'.")
+            return
+
+        # Append/insert this arbitrary epoch into forecast_results_df so inspector and table stay synced
+        if self.forecast_results_df is None or self.forecast_results_df.empty:
+            self.forecast_results_df = arb_df.copy()
+            new_idx = 0
+        else:
+            new_idx = len(self.forecast_results_df)
+            self.forecast_results_df = pd.concat([self.forecast_results_df, arb_df], ignore_index=True)
+
+        row = arb_df.iloc[0]
+        t_fmt = str(row.get('timestamp', row.get('utc_time', target_dt.strftime('%Y-%m-%d %H:%M:%S'))))
+        sat = str(row.get('satellite_id', row.get('Satellite_ID', '—')))
+        orbit = str(row.get('orbit_type', '')).upper()
+        if not orbit or orbit == 'NAN':
+            m_mem = self.controller.get_model_for_satellite(sat)
+            orbit = m_mem.get('orbit_type', 'GEO') if m_mem else 'GEO'
+        m_used = str(row.get('model_used', '—'))
+        mode = "Arbitrary"
+
+        def _fmt_val(val: Any) -> str:
+            try:
+                if pd.notna(val):
+                    return f"{float(val):.4f}"
+            except Exception:
+                pass
+            return "0.0000"
+
+        px = _fmt_val(row.get('predicted_X', row.get('pred_Error_X', 0.0)))
+        py = _fmt_val(row.get('predicted_Y', row.get('pred_Error_Y', 0.0)))
+        pz = _fmt_val(row.get('predicted_Z', row.get('pred_Error_Z', 0.0)))
+        pclk = _fmt_val(row.get('predicted_Clock', row.get('pred_Error_Clock', 0.0)))
+        p3d = _fmt_val(row.get('pred_3D_Orbit_Error', 0.0))
+
+        row_iid = f"row_{new_idx}"
+        self.pred_table.tag_configure('arbitrary', background='#FEF3C7', foreground='#92400E')
+        self.pred_table.insert(
+            '',
+            'end',
+            iid=row_iid,
+            values=(new_idx + 1, f"{t_fmt} [Arbitrary]", sat, orbit, m_used, mode, px, py, pz, pclk, p3d),
+            tags=('arbitrary',),
+        )
+        self.pred_table.selection_set(row_iid)
+        self.pred_table.see(row_iid)
+
+        # Update combobox to keep clean time-of-day timestamp
+        clean_time_display = target_dt.strftime('%H:%M:%S')
+        cur_vals = list(self.p2_epoch_combo['values'])
+        if clean_time_display not in cur_vals:
+            cur_vals.append(clean_time_display)
+            self.p2_epoch_combo['values'] = cur_vals
+        self.p2_epoch_search_var.set(clean_time_display)
+
+        # Display instantaneous errors in the inspector card
+        self._display_selected_epoch_error(new_idx)
+
+    def _on_p2_table_row_selected(self, event=None) -> None:
+        """Handler when user clicks any row in the Stage 2 error output table."""
+        selected = self.pred_table.selection()
+        if not selected:
+            return
+        iid = selected[0]
+        try:
+            if iid.startswith("row_"):
+                idx = int(iid.split("_")[1])
+                vals = self.pred_table.item(iid, 'values')
+                if len(vals) > 1:
+                    t_str = str(vals[1]).replace("[Arbitrary]", "").strip()
+                    clean_t = t_str.split()[1] if (' ' in t_str and '-' in t_str.split()[0]) else t_str
+                    self.p2_epoch_search_var.set(clean_t)
+                self._display_selected_epoch_error(idx)
+        except Exception:
+            pass
+
+    def _jump_epoch_first(self) -> None:
+        if self.forecast_results_df is None or self.forecast_results_df.empty:
+            return
+        t_values = list(self.p2_epoch_combo['values'])
+        if t_values:
+            self.p2_epoch_search_var.set(t_values[0])
+            self._on_p2_epoch_selected()
+
+    def _jump_epoch_prev(self) -> None:
+        if self.forecast_results_df is None or self.forecast_results_df.empty:
+            return
+        t_values = list(self.p2_epoch_combo['values'])
+        cur = self.p2_epoch_search_var.get()
+        if cur in t_values:
+            idx = max(0, t_values.index(cur) - 1)
+            self.p2_epoch_search_var.set(t_values[idx])
+            self._on_p2_epoch_selected()
+
+    def _jump_epoch_next(self) -> None:
+        if self.forecast_results_df is None or self.forecast_results_df.empty:
+            return
+        t_values = list(self.p2_epoch_combo['values'])
+        cur = self.p2_epoch_search_var.get()
+        if cur in t_values:
+            idx = min(len(t_values) - 1, t_values.index(cur) + 1)
+            self.p2_epoch_search_var.set(t_values[idx])
+            self._on_p2_epoch_selected()
+
+    def _jump_epoch_last(self) -> None:
+        if self.forecast_results_df is None or self.forecast_results_df.empty:
+            return
+        t_values = list(self.p2_epoch_combo['values'])
+        if t_values:
+            self.p2_epoch_search_var.set(t_values[-1])
+            self._on_p2_epoch_selected()
 
     def _export_predictions_csv(self) -> None:
         if self.forecast_results_df is None or self.forecast_results_df.empty:
@@ -1567,13 +2133,27 @@ class NeuroNavApp(tk.Tk):
                     return f"{default:.4f}"
             w = _flt_fmt(tm.get('shapiro_w', 1.0), 1.0)
             p = format_stat_p_val(tm.get('shapiro_p', 1.0))
+            h0_val = tm.get('h0_result', 0 if float(tm.get('shapiro_p', 1.0)) >= 0.05 else 1)
+            h0_str = f"{h0_val} (Normal)" if h0_val == 0 else f"{h0_val} (Reject)"
             bias = _flt_fmt(tm.get('bias', 0.0))
             std = _flt_fmt(tm.get('std', 0.0))
             mae = _flt_fmt(tm.get('mae', 0.0))
             rmse = _flt_fmt(tm.get('rmse', 0.0))
             r2 = _flt_fmt(tm.get('r2', 0.0))
             max_ae = _flt_fmt(tm.get('max_ae', 0.0))
-            self.shapiro_table.insert('', 'end', values=(label, w, p, bias, std, mae, rmse, r2, max_ae))
+            self.shapiro_table.insert('', 'end', values=(label, w, p, h0_str, bias, std, mae, rmse, r2, max_ae))
+
+        # Overall Macro-Average Row (Priority 1 & Priority 2)
+        w_all = _flt_fmt(model_metrics.get('shapiro_w_mean', 1.0), 1.0)
+        p_all = format_stat_p_val(model_metrics.get('shapiro_p_mean', 1.0))
+        h0_all = model_metrics.get('h0_result_mean', 0 if float(model_metrics.get('shapiro_p_mean', 1.0)) >= 0.05 else 1)
+        h0_all_str = f"{h0_all} (Normal)" if h0_all == 0 else f"{h0_all} (Reject)"
+        bias_all = _flt_fmt(model_metrics.get('mean_res_mean', 0.0))
+        std_all = _flt_fmt(model_metrics.get('std_res_mean', 0.0))
+        mae_3d_all = _flt_fmt(model_metrics.get('mae_3d', 0.0))
+        rmse_3d_all = _flt_fmt(model_metrics.get('rmse_3d', 0.0))
+        self.shapiro_table.insert('', 'end', values=("MACRO-AVG (ALL 4)", w_all, p_all, h0_all_str, bias_all, std_all, mae_3d_all, rmse_3d_all, "—", "—"), tags=('summary',))
+        self.shapiro_table.tag_configure('summary', background=STITCH_THEME['table_select_bg'])
 
         # Render Matplotlib plots
         for ax in self.axes.flat:

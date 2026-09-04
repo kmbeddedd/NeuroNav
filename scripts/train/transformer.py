@@ -5,7 +5,7 @@ import platform
 import sys
 from pathlib import Path
 from typing import Any
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import numpy as np
 import torch
 from torch.optim.lr_scheduler import ReduceLROnPlateau
@@ -22,7 +22,7 @@ from src.visualization.scientific import plot_diffusion_samples, plot_frequency_
 
 def parse_args(argv: list[str] | None=None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Train a leakage-safe probabilistic GNSS forecaster')
-    parser.add_argument('--data', default=DEFAULT_DATA_PATH)
+    parser.add_argument('--data', required=DEFAULT_DATA_PATH is None, default=DEFAULT_DATA_PATH)
     parser.add_argument('--output', default='./results/transformer')
     parser.add_argument('--epochs', type=int, default=TRANSFORMER_DEFAULTS['epochs'])
     parser.add_argument('--early-stopping-patience', type=int, default=8)
@@ -47,6 +47,8 @@ def parse_args(argv: list[str] | None=None) -> argparse.Namespace:
     parser.add_argument('--lambda-event', type=float, default=0.0)
     parser.add_argument('--lambda-smooth', type=float, default=0.0)
     parser.add_argument('--lambda-dilate', type=float, default=0.0)
+    parser.add_argument('--lambda-freq', type=float, default=0.0, help='Spectral FFT consistency loss weight')
+    parser.add_argument('--lambda-clock', type=float, default=0.0, help='Clock drift acceleration penalty weight')
     parser.add_argument('--enable-diffusion', action='store_true')
     parser.add_argument('--ddim-steps', type=int, default=20)
     parser.add_argument('--diffusion-eval-samples', type=int, default=20)
@@ -73,7 +75,23 @@ def _gpu_loader(bundle: dict[str, Any], split: str, device: torch.device, batch_
 
 def _loss(outputs: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor], targets: torch.Tensor, spikes: torch.Tensor, mask: torch.Tensor, args: argparse.Namespace) -> torch.Tensor:
     mu, scale, event_logits, _ = outputs
-    return composite_transformer_loss(mu=mu, sigma=scale, spike_probs=event_logits, targets=targets, spike_targets=spikes, target_mask=mask, distribution=args.distribution, degrees_of_freedom=args.student_t_df, lambda_spike=args.lambda_event, lambda_smooth=args.lambda_smooth, lambda_dilate=args.lambda_dilate, orbit_loss_weight=args.orbit_loss_weight, clock_loss_weight=args.clock_loss_weight)
+    return composite_transformer_loss(
+        mu=mu,
+        sigma=scale,
+        spike_probs=event_logits,
+        targets=targets,
+        spike_targets=spikes,
+        target_mask=mask,
+        distribution=args.distribution,
+        degrees_of_freedom=args.student_t_df,
+        lambda_spike=args.lambda_event,
+        lambda_smooth=args.lambda_smooth,
+        lambda_dilate=args.lambda_dilate,
+        lambda_freq=args.lambda_freq,
+        lambda_clock=args.lambda_clock,
+        orbit_loss_weight=args.orbit_loss_weight,
+        clock_loss_weight=args.clock_loss_weight
+    )
 
 def train_one_epoch(model: GNSSForecaster, loader: FastGPUTensorLoader, optimizer: torch.optim.Optimizer, amp_scaler: torch.amp.GradScaler, use_amp: bool, args: argparse.Namespace) -> float:
     model.train()

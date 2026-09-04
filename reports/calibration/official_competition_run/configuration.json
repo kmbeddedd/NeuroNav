@@ -1,0 +1,19 @@
+{
+  "selection_policy": "official_competition",
+  "primary_metric": "shapiro_w_avg",
+  "alpha": 0.05,
+  "tie_tolerance": 0.0001,
+  "candidate_models": [
+    "persistence",
+    "harmonic_ridge",
+    "random_forest",
+    "gaussian_process",
+    "geo_moe",
+    "bilstm_gru",
+    "transformer",
+    "decoupled_clock",
+    "nhits"
+  ],
+  "artifacts_dir": "models\\registry\\artifacts",
+  "reports_dir": "reports\\calibration"
+}

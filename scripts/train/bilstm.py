@@ -5,7 +5,7 @@ import platform
 import sys
 from pathlib import Path
 from typing import Any
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -21,7 +21,7 @@ from src.visualization.scientific import plot_multihorizon_heatmap, plot_per_sat
 
 def parse_args(argv: list[str] | None=None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Train the masked BiLSTM-GRU GNSS benchmark')
-    parser.add_argument('--data', default=DEFAULT_DATA_PATH)
+    parser.add_argument('--data', required=DEFAULT_DATA_PATH is None, default=DEFAULT_DATA_PATH)
     parser.add_argument('--output', default=DEFAULT_OUTPUT_DIR)
     parser.add_argument('--epochs', type=int, default=45)
     parser.add_argument('--early-stopping-patience', type=int, default=10)

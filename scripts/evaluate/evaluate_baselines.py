@@ -5,7 +5,7 @@ import math
 import sys
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import numpy as np
 import pandas as pd
 from src.baselines import BASELINE_NAMES, DEFAULT_BASELINE_NAMES, evaluate_baselines

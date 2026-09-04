@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "description": "NeuroNav Runtime Inference Contract defining minimum input requirements for GNSS orbit and clock error forecasting",
+  "time": {
+    "timestamp_columns": ["Timestamp", "utc_time"],
+    "expected_cadence_minutes": 15,
+    "minimum_history_steps": 96,
+    "forecast_horizon_steps": 96
+  },
+  "entity": {
+    "satellite_id_column": "Satellite_ID",
+    "allowed_constellation_prefixes": ["G", "R", "E", "C"]
+  },
+  "required_columns": [
+    "Timestamp",
+    "Satellite_ID",
+    "Error_X",
+    "Error_Y",
+    "Error_Z",
+    "Error_Clock"
+  ],
+  "optional_columns": [
+    "Constellation",
+    "Broadcast_X",
+    "Broadcast_Y",
+    "Broadcast_Z",
+    "Broadcast_Clock",
+    "Modelled_X",
+    "Modelled_Y",
+    "Modelled_Z",
+    "Modelled_Clock",
+    "3D_Orbit_Error"
+  ],
+  "target_definitions": {
+    "Error_X": "Satellite orbit X component error",
+    "Error_Y": "Satellite orbit Y component error",
+    "Error_Z": "Satellite orbit Z component error",
+    "Error_Clock": "Satellite onboard clock bias error",
+    "3D_Orbit_Error": "Derived 3D Euclidean orbit error norm: sqrt(Error_X^2 + Error_Y^2 + Error_Z^2)"
+  },
+  "units": {
+    "Error_X": "metre",
+    "Error_Y": "metre",
+    "Error_Z": "metre",
+    "Error_Clock": "second",
+    "3D_Orbit_Error": "metre"
+  },
+  "missing_values": {
+    "max_allowed_consecutive_missing_steps": 0,
+    "policy": "History sequence must be temporally contiguous without missing steps"
+  },
+  "output_contract": {
+    "forecast_columns": [
+      "forecast_step",
+      "forecast_time",
+      "Satellite_ID",
+      "pred_Error_X",
+      "pred_Error_Y",
+      "pred_Error_Z",
+      "pred_Error_Clock",
+      "pred_3D_Orbit_Error"
+    ],
+    "optional_uncertainty_columns": [
+      "pred_Error_X_low",
+      "pred_Error_X_high",
+      "pred_Error_Y_low",
+      "pred_Error_Y_high",
+      "pred_Error_Z_low",
+      "pred_Error_Z_high",
+      "pred_Error_Clock_low",
+      "pred_Error_Clock_high"
+    ]
+  }
+}

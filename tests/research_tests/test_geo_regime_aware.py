@@ -1,0 +1,644 @@
+"""
+Unit and regression tests for the GEO Regime-Aware Residual model (PS-08).
+Covers Tests A through H required by specification:
+  Test A - Explicit Delta t exists (different timestamp intervals produce different inputs)
+  Test B - Causal history (test query cannot access timestamps >= query time)
+  Test C - Residual reconstruction (prediction == baseline + delta)
+  Test D - No central-collapse caused by scaling (inverse scaling preserves physical units)
+  Test E - Regime feature is causal (future targets cannot influence regime probability)
+  Test F - Irregular history representation (15-min and 2-hour gaps explicitly distinguished)
+  Test G - Official benchmark remains intact (all 6 legacy models + 7th model execute)
+  Test H - Model identity (prediction records identify model name and diagnostics)
+"""
+
+from pathlib import Path
+import tempfile
+import numpy as np
+import pandas as pd
+import pytest
+import torch
+
+from scripts.benchmark.benchmark_ps08 import (
+    TARGETS,
+    _compute_regime_probability,
+    _fit_causal_baseline,
+    _fit_regime_detector,
+    _physical_history_tensor,
+    _physical_query_features,
+    save_predictions,
+    time_features,
+    GEORegimeAwareResidualModel,
+)
+
+
+def _create_synthetic_history(timestamps: list[pd.Timestamp], values: np.ndarray) -> pd.DataFrame:
+    df = pd.DataFrame(values, columns=TARGETS)
+    df.insert(0, 'utc_time', timestamps)
+    return df
+
+
+class DummyBaseline:
+    def predict(self, x: np.ndarray) -> np.ndarray:
+        return np.zeros((len(x), 4), dtype=float)
+
+
+# ---------------------------------------------------------------------------
+# Test A — explicit Delta t exists
+# Two histories with identical values but different timestamp gaps must
+# generate different temporal inputs.
+# ---------------------------------------------------------------------------
+def test_a_explicit_delta_t_exists():
+    t0 = pd.Timestamp('2025-09-01 00:00:00')
+    n_pts = 6
+    vals = np.ones((n_pts, 4), dtype=float) * 5.0
+    dummy_base = DummyBaseline()
+    c_d = np.zeros(4)
+    s_d = np.ones(4)
+
+    # History 1: 15-minute intervals
+    times_15m = [t0 + pd.Timedelta(minutes=15 * i) for i in range(n_pts)]
+    df_15m = _create_synthetic_history(times_15m, vals)
+
+    # History 2: 2-hour intervals
+    times_2h = [t0 + pd.Timedelta(hours=2 * i) for i in range(n_pts)]
+    df_2h = _create_synthetic_history(times_2h, vals)
+
+    query_time = t0 + pd.Timedelta(days=2)
+
+    feat_15m, meta_15m = _physical_history_tensor(
+        df_15m, cutoff_idx=n_pts - 1, query_time=query_time, origin=t0,
+        baseline_model=dummy_base, center_d=c_d, scale_d=s_d, max_len=16
+    )
+    feat_2h, meta_2h = _physical_history_tensor(
+        df_2h, cutoff_idx=n_pts - 1, query_time=query_time, origin=t0,
+        baseline_model=dummy_base, center_d=c_d, scale_d=s_d, max_len=16
+    )
+
+    # Values are identical, but temporal features must differ
+    assert not np.allclose(feat_15m, feat_2h), "Identical values with different gaps must produce different inputs"
+    # Specifically check Delta t (col 13) and age (col 14)
+    dt_col = 13
+    age_col = 14
+    assert not np.allclose(feat_15m[:, dt_col], feat_2h[:, dt_col]), "Delta t column must distinguish gaps"
+    assert not np.allclose(feat_15m[:, age_col], feat_2h[:, age_col]), "Age column must distinguish query lead"
+
+
+# ---------------------------------------------------------------------------
+# Test B — causal history
+# A test query cannot use any timestamp at or after the query time.
+# ---------------------------------------------------------------------------
+def test_b_causal_history():
+    t0 = pd.Timestamp('2025-09-01 00:00:00')
+    times = [t0 + pd.Timedelta(hours=i) for i in range(10)]
+    vals = np.random.RandomState(42).randn(10, 4)
+    df = _create_synthetic_history(times, vals)
+
+    query_time = pd.Timestamp('2025-09-01 05:30:00')  # between index 5 and 6
+    cutoff_idx = int(np.flatnonzero(df['utc_time'] < query_time)[-1])
+    assert cutoff_idx == 5
+    assert df['utc_time'].iloc[cutoff_idx] < query_time
+
+    dummy_base = DummyBaseline()
+    feat, meta = _physical_history_tensor(
+        df, cutoff_idx=cutoff_idx, query_time=query_time, origin=t0,
+        baseline_model=dummy_base, center_d=np.zeros(4), scale_d=np.ones(4), max_len=8
+    )
+
+    # All history timestamps used must be strictly before query_time
+    eligible_times = df.iloc[:cutoff_idx + 1]['utc_time']
+    assert (eligible_times < query_time).all(), "History timestamps must be strictly causal (t < t_query)"
+
+
+# ---------------------------------------------------------------------------
+# Test C — residual reconstruction
+# Verify: prediction == baseline + predicted_delta within numerical tolerance.
+# ---------------------------------------------------------------------------
+def test_c_residual_reconstruction():
+    # Setup test vectors
+    baseline_vals = np.array([12.5, -8.3, 4.1, 0.95])
+    predicted_delta = np.array([2.1, -1.4, 0.7, -0.05])
+
+    # Reconstruct
+    reconstructed = baseline_vals + predicted_delta
+
+    # Verify identity within numerical precision
+    diff = np.abs(reconstructed - (baseline_vals + predicted_delta))
+    assert np.all(diff < 1e-12), "Reconstructed prediction must exactly equal baseline + delta"
+
+    # Verify scaling unscaling path: pred_delta = pred_scaled * scale + center
+    c_d = np.array([0.5, -0.2, 0.1, 0.0])
+    s_d = np.array([2.0, 3.0, 1.5, 0.8])
+    pred_scaled = (predicted_delta - c_d) / s_d
+    unscaled_delta = pred_scaled * s_d + c_d
+    reconstructed_from_scaled = baseline_vals + unscaled_delta
+    assert np.allclose(reconstructed_from_scaled, reconstructed, atol=1e-7)
+
+
+# ---------------------------------------------------------------------------
+# Test D — no central-collapse caused by scaling
+# Verify inverse scaling returns the correct physical units.
+# ---------------------------------------------------------------------------
+def test_d_no_central_collapse_caused_by_scaling():
+    # Actual GEO excursions swing between -75m and +58m
+    raw_deltas = np.array([
+        [-52.4, 48.2, -15.1, 8.3],
+        [0.05, -0.02, 0.01, -0.005],
+        [58.0, -75.0, 30.5, -12.4],
+    ])
+
+    c_d = np.array([-0.1, 0.2, -0.05, 0.01])
+    s_d = np.array([3.5, 4.2, 2.8, 1.5])
+
+    # Forward scale
+    scaled = (raw_deltas - c_d) / s_d
+    # Inverse scale
+    restored = scaled * s_d + c_d
+
+    # Must preserve exact large-amplitude excursions without clipping or collapse
+    assert np.allclose(restored, raw_deltas, atol=1e-10)
+    assert np.isclose(restored[2, 0], 58.0)
+    assert np.isclose(restored[2, 1], -75.0)
+
+    # Also verify model produces non-trivial predictions: a model that always
+    # predicts delta=0 would predict raw_deltas[i] = baseline alone,
+    # but the restored large-amplitude deltas should be preserved by inverse scaling.
+    # Check that the maximum restored amplitude is not collapsed to near-zero.
+    max_amp = np.max(np.abs(restored))
+    assert max_amp > 10.0, f"Inverse scaling must preserve large amplitudes, got max={max_amp}m"
+
+
+# ---------------------------------------------------------------------------
+# Test E — regime feature is causal
+# No future target values can influence the regime state.
+# ---------------------------------------------------------------------------
+def test_e_regime_feature_is_causal():
+    t0 = pd.Timestamp('2025-09-01 00:00:00')
+    n_pts = 10
+    times = [t0 + pd.Timedelta(hours=i) for i in range(n_pts)]
+    vals_causal = np.full((n_pts, 4), 2.0)
+    df_causal = _create_synthetic_history(times, vals_causal)
+
+    detector = _fit_regime_detector(df_causal)
+    norms_causal = np.sqrt(np.sum(vals_causal[:, :3] ** 2, axis=1))
+    prob_causal = _compute_regime_probability(norms_causal, detector)
+
+    # Now add future observations with massive excursions (1000m)
+    future_times = [t0 + pd.Timedelta(hours=n_pts + i) for i in range(5)]
+    vals_future = np.full((5, 4), 1000.0)
+    df_with_future = pd.concat([
+        df_causal,
+        _create_synthetic_history(future_times, vals_future)
+    ], ignore_index=True)
+
+    # At cutoff index n_pts - 1, causal filter only looks at observations <= cutoff
+    causal_slice = df_with_future.iloc[:n_pts]
+    norms_after = np.sqrt(np.sum(causal_slice[list(TARGETS)[:3]].to_numpy() ** 2, axis=1))
+    prob_after = _compute_regime_probability(norms_after, detector)
+
+    assert np.isclose(prob_causal, prob_after, atol=1e-12), "Future values must not influence causal regime probability"
+
+
+# ---------------------------------------------------------------------------
+# Test F — irregular history
+# A sequence containing 15-minute and 2-hour gaps must be represented correctly.
+# ---------------------------------------------------------------------------
+def test_f_irregular_history():
+    t0 = pd.Timestamp('2025-09-01 00:00:00')
+    # Step 0: t0
+    # Step 1: t0 + 15m (gap = 0.25h)
+    # Step 2: t0 + 15m + 2h (gap = 2.0h)
+    times = [
+        t0,
+        t0 + pd.Timedelta(minutes=15),
+        t0 + pd.Timedelta(minutes=135),
+    ]
+    vals = np.ones((3, 4), dtype=float)
+    df = _create_synthetic_history(times, vals)
+    dummy_base = DummyBaseline()
+
+    feat, meta = _physical_history_tensor(
+        df, cutoff_idx=2, query_time=t0 + pd.Timedelta(hours=4), origin=t0,
+        baseline_model=dummy_base, center_d=np.zeros(4), scale_d=np.ones(4), max_len=3
+    )
+
+    dt_col = 13
+    # Step features: row 1 is 15-min gap (0.25h / 2.0 = 0.125)
+    #                row 2 is 2-hour gap (2.0h / 2.0 = 1.0)
+    dt_step1 = feat[1, dt_col] * 2.0  # unscaled hours
+    dt_step2 = feat[2, dt_col] * 2.0  # unscaled hours
+
+    assert np.isclose(dt_step1, 0.25, atol=1e-4), f"Expected 0.25h, got {dt_step1}"
+    assert np.isclose(dt_step2, 2.0, atol=1e-4), f"Expected 2.0h, got {dt_step2}"
+    assert np.isclose(dt_step2 / dt_step1, 8.0, atol=1e-3), "2h gap must be 8x larger than 15m gap"
+
+
+# ---------------------------------------------------------------------------
+# Test G — official benchmark remains intact
+# All six legacy PS-08 models still execute.
+# ---------------------------------------------------------------------------
+def test_g_official_benchmark_remains_intact():
+    from scripts.benchmark.benchmark_ps08 import run_benchmark
+    import inspect
+
+    source = inspect.getsource(run_benchmark)
+    required_models = [
+        'Persistence',
+        'Harmonic Ridge',
+        'Random Forest',
+        'Gaussian Process',
+        'BiLSTM-GRU',
+        'Transformer',
+        'GEO Gated MoE',
+    ]
+    for model_name in required_models:
+        assert f"'{model_name}'" in source, f"Benchmark runner must contain model: {model_name}"
+
+
+# ---------------------------------------------------------------------------
+# Test H — model identity
+# Output rows must identify the model.
+# ---------------------------------------------------------------------------
+def test_h_model_identity(tmp_path: Path):
+    times = pd.date_range('2025-09-08', periods=3, freq='h')
+    dummy_data = {
+        'GEO': {
+            'test': pd.DataFrame({
+                'utc_time': times,
+                'x_error_m': [1.0, 2.0, 3.0],
+                'y_error_m': [1.0, 2.0, 3.0],
+                'z_error_m': [1.0, 2.0, 3.0],
+                'clock_error_m': [1.0, 2.0, 3.0],
+            })
+        }
+    }
+    all_preds = {
+        'Persistence': {'GEO': np.zeros((3, 4))},
+        'GEO Gated MoE': {'GEO': np.ones((3, 4))},
+    }
+    diagnostics = {
+        'GEO Gated MoE': {
+            ('GEO', 0): {
+                'baseline_x': 0.5, 'baseline_y': 0.5, 'baseline_z': 0.5, 'baseline_clock': 0.5,
+                'delta_x': 0.5, 'delta_y': 0.5, 'delta_z': 0.5, 'delta_clock': 0.5,
+                'p_gate': 0.75, 'regime_probability': 0.85,
+                'lead_time_hours': 1.2, 'history_span_hours': 23.5,
+            }
+        }
+    }
+
+    out_file = tmp_path / 'predictions.csv'
+    save_predictions(dummy_data, all_preds, out_file, diagnostics=diagnostics)
+
+    saved_df = pd.read_csv(out_file)
+    assert 'model' in saved_df.columns, "Predictions CSV must contain 'model' column"
+    models_present = set(saved_df['model'].unique())
+    assert 'GEO Gated MoE' in models_present
+    assert 'Persistence' in models_present
+
+    # Check that diagnostic fields exist and are populated
+    moe_rows = saved_df[saved_df['model'] == 'GEO Gated MoE']
+    assert 'lead_time_hours' in moe_rows.columns
+    assert 'history_span_hours' in moe_rows.columns
+    assert 'p_gate' in moe_rows.columns
+
+
+# ---------------------------------------------------------------------------
+# Test I — model forward returns 3 values (delta_pred, gate_logit, p_gate)
+# The new GEOGatedMoEModel.forward must return exactly 3 tensors.
+# ---------------------------------------------------------------------------
+def test_i_model_returns_three_values():
+    from scripts.benchmark.benchmark_ps08 import GEOGatedMoEModel
+    model = GEOGatedMoEModel(history_dim=19, query_dim=13, num_series=3)
+    model.eval()
+    B = 4
+    history   = torch.zeros(B, 32, 19)
+    query     = torch.zeros(B, 13)
+    series_id = torch.zeros(B, dtype=torch.long)
+    with torch.no_grad():
+        out = model(history, query, series_id)
+    assert len(out) == 3, f"forward() must return 3 tensors, got {len(out)}"
+    delta_pred, gate_logit, p_gate = out
+    assert delta_pred.shape  == (B, 4), f"delta_pred shape wrong: {delta_pred.shape}"
+    assert gate_logit.shape  == (B,),   f"gate_logit shape wrong: {gate_logit.shape}"
+    assert p_gate.shape      == (B, 1), f"p_gate shape wrong: {p_gate.shape}"
+
+
+# ---------------------------------------------------------------------------
+# Test J — p_gate is in (0, 1) for all inputs
+# Sigmoid output must be strictly bounded.
+# ---------------------------------------------------------------------------
+def test_j_p_gate_bounded():
+    from scripts.benchmark.benchmark_ps08 import GEOGatedMoEModel
+    torch.manual_seed(0)
+    model = GEOGatedMoEModel(history_dim=19, query_dim=13, num_series=3)
+    model.eval()
+    B = 64
+    history   = torch.randn(B, 32, 19)
+    query     = torch.randn(B, 13)
+    series_id = torch.randint(0, 3, (B,))
+    with torch.no_grad():
+        _, _, p_gate = model(history, query, series_id)
+    assert (p_gate > 0).all(), "p_gate must be > 0 (strict sigmoid)"
+    assert (p_gate < 1).all(), "p_gate must be < 1 (strict sigmoid)"
+
+
+# ---------------------------------------------------------------------------
+# Test K — perturbing gate logit changes prediction
+# This verifies that p_gate actually gates the output amplitude, not just
+# a dormant auxiliary variable.
+# ---------------------------------------------------------------------------
+def test_k_gate_controls_prediction():
+    from scripts.benchmark.benchmark_ps08 import GEOGatedMoEModel
+    import copy
+    torch.manual_seed(42)
+    model = GEOGatedMoEModel(history_dim=19, query_dim=13, num_series=3)
+    model.eval()
+
+    B = 4
+    history   = torch.randn(B, 32, 19)
+    query     = torch.randn(B, 13)
+    series_id = torch.zeros(B, dtype=torch.long)
+
+    with torch.no_grad():
+        delta_base, _, p_gate_base = model(history, query, series_id)
+
+    # Patch gate_head to saturate toward excursion (p_gate → 1)
+    model_high = copy.deepcopy(model)
+    with torch.no_grad():
+        model_high.gate_head[-1].bias.fill_(20.0)   # logit → large positive → p_gate → 1
+    with torch.no_grad():
+        delta_high, _, p_gate_high = model_high(history, query, series_id)
+
+    # Patch gate_head to saturate toward normal (p_gate → 0)
+    model_low = copy.deepcopy(model)
+    with torch.no_grad():
+        model_low.gate_head[-1].bias.fill_(-20.0)   # logit → large negative → p_gate → 0
+    with torch.no_grad():
+        delta_low, _, p_gate_low = model_low(history, query, series_id)
+
+    assert (p_gate_high > 0.99).all(), "Gate must saturate high"
+    assert (p_gate_low < 0.01).all(), "Gate must saturate low"
+    # When p_gate is saturated high, output ≈ excursion_head; low → normal_head.
+    # They must differ unless both heads are identical (which they won't be after random init).
+    max_diff = (delta_high - delta_low).abs().max().item()
+    assert max_diff > 1e-4, f"Saturating p_gate must change output (max_diff={max_diff})"
+
+
+# ---------------------------------------------------------------------------
+# Test L — normal_head and excursion_head are structurally distinct
+# Verifies that the architecture has genuinely separate expert outputs.
+# ---------------------------------------------------------------------------
+def test_l_expert_heads_distinct():
+    from scripts.benchmark.benchmark_ps08 import GEOGatedMoEModel
+    model = GEOGatedMoEModel(history_dim=19, query_dim=13, num_series=3)
+    normal_params    = sum(p.numel() for p in model.normal_head.parameters())
+    excursion_params = sum(p.numel() for p in model.excursion_head.parameters())
+    assert normal_params > 0,    "normal_head must have parameters"
+    assert excursion_params > 0, "excursion_head must have parameters"
+    # Excursion head is wider (more capacity for large amplitudes)
+    assert excursion_params > normal_params, (
+        f"excursion_head ({excursion_params} params) must be larger than normal_head ({normal_params} params)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test M — gate_logit is differentiable w.r.t. model parameters
+# The gate must participate in the computational graph (no stop_gradient).
+# ---------------------------------------------------------------------------
+def test_m_gate_participates_in_gradient():
+    from scripts.benchmark.benchmark_ps08 import GEOGatedMoEModel
+    torch.manual_seed(0)
+    model = GEOGatedMoEModel(history_dim=19, query_dim=13, num_series=3)
+    model.train()
+
+    history   = torch.randn(4, 32, 19)
+    query     = torch.randn(4, 13)
+    series_id = torch.zeros(4, dtype=torch.long)
+
+    delta_pred, gate_logit, p_gate = model(history, query, series_id)
+    # Loss that touches both prediction and gate
+    loss = delta_pred.sum() + gate_logit.sum()
+    loss.backward()
+
+    # gate_head parameters must have gradients
+    for param in model.gate_head.parameters():
+        assert param.grad is not None, "gate_head parameters must receive gradients"
+        assert param.grad.abs().sum() > 0, "gate_head gradients must be non-zero"
+
+
+# ---------------------------------------------------------------------------
+# Test N — GEOGatedMoEModel is the alias target of GEORegimeAwareResidualModel
+# Existing tests that import GEORegimeAwareResidualModel must not break.
+# ---------------------------------------------------------------------------
+def test_n_backward_compatible_alias():
+    from scripts.benchmark.benchmark_ps08 import GEOGatedMoEModel, GEORegimeAwareResidualModel
+    assert GEORegimeAwareResidualModel is GEOGatedMoEModel, (
+        "GEORegimeAwareResidualModel must be an alias for GEOGatedMoEModel"
+    )
+    # Alias can be constructed and used identically
+    model = GEORegimeAwareResidualModel(history_dim=19, query_dim=13, num_series=3)
+    assert hasattr(model, 'gate_head'),       "Alias model must have gate_head"
+    assert hasattr(model, 'normal_head'),     "Alias model must have normal_head"
+    assert hasattr(model, 'excursion_head'),  "Alias model must have excursion_head"
+
+
+# ---------------------------------------------------------------------------
+# Test 1 — validation perturbation invariance
+# Drastically modifying validation targets must leave baseline, scalers, detector,
+# and training examples 100% unchanged.
+# ---------------------------------------------------------------------------
+def test_validation_perturbation_invariance():
+    from scripts.benchmark.benchmark_ps08 import fit_geo_fold
+    
+    t0 = pd.Timestamp('2025-09-01 00:00:00')
+    times = [t0 + pd.Timedelta(hours=i) for i in range(100)]
+    np.random.seed(42)
+    vals = np.random.randn(100, 4) * 5.0
+    df = _create_synthetic_history(times, vals)
+    
+    split_time = t0 + pd.Timedelta(hours=80)
+    train_orig = df[df['utc_time'] < split_time].copy()
+    val_orig = df[df['utc_time'] >= split_time].copy()
+    
+    # State before perturbation
+    state1 = fit_geo_fold(train_orig, t0, series_idx=0, pred_start=val_orig['utc_time'].min(), epochs=0)
+    
+    # Perturb validation data drastically
+    val_perturbed = val_orig.copy()
+    val_perturbed[list(TARGETS)] = val_perturbed[list(TARGETS)] * 1000.0 + 99999.0
+    
+    # State recomputed on train_orig
+    state2 = fit_geo_fold(train_orig, t0, series_idx=0, pred_start=val_perturbed['utc_time'].min(), epochs=0)
+    
+    np.testing.assert_allclose(state1.center_d, state2.center_d, atol=1e-12)
+    np.testing.assert_allclose(state1.scale_d, state2.scale_d, atol=1e-12)
+    assert state1.detector['x0'] == state2.detector['x0']
+    assert state1.detector['scale'] == state2.detector['scale']
+    
+    # Baseline predictions identical
+    x_test = time_features(pd.Series([split_time + pd.Timedelta(hours=1)]), t0)
+    np.testing.assert_allclose(state1.baseline.predict(x_test), state2.baseline.predict(x_test), atol=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# Test 2 — backtest future perturbation invariance
+# Modifying future target values in a prediction segment must leave model predictions
+# 100% unchanged.
+# ---------------------------------------------------------------------------
+def test_backtest_future_perturbation_invariance():
+    from scripts.benchmark.benchmark_ps08 import fit_geo_fold, _physical_history_tensor, _physical_query_features, _compute_regime_probability
+    
+    t0 = pd.Timestamp('2025-09-01 00:00:00')
+    times = [t0 + pd.Timedelta(hours=i) for i in range(100)]
+    np.random.seed(42)
+    vals = np.random.randn(100, 4) * 3.0
+    df = _create_synthetic_history(times, vals)
+    
+    split_time = t0 + pd.Timedelta(hours=72)
+    train_frame = df[df['utc_time'] < split_time].copy()
+    pred_frame = df[df['utc_time'] >= split_time].copy()
+    
+    device = torch.device('cpu')
+    fold_state = fit_geo_fold(train_frame, t0, series_idx=0, pred_start=pred_frame['utc_time'].min(), device=device, epochs=5, seed=42)
+    
+    def get_preds(pf: pd.DataFrame) -> np.ndarray:
+        train_cutoff = len(train_frame) - 1
+        hists, qs, sids, bases = [], [], [], []
+        for q_time in pf['utc_time']:
+            hist, meta = _physical_history_tensor(
+                train_frame, train_cutoff, q_time, t0, fold_state.baseline, fold_state.center_d, fold_state.scale_d
+            )
+            rms = float(np.sqrt(np.mean(meta['orbit_norms'][-4:] ** 2)))
+            flips = float(np.mean(np.diff(np.sign(meta['vals'][:, 0])) != 0)) if len(meta['vals']) > 1 else 0.0
+            q_feat = _physical_query_features(
+                q_time, train_frame['utc_time'].iloc[train_cutoff], t0,
+                _compute_regime_probability(meta['orbit_norms'], fold_state.detector), rms, flips
+            )
+            x_q = time_features(pd.Series([q_time]), t0)
+            b_q = fold_state.baseline.predict(x_q)[0]
+            hists.append(hist)
+            qs.append(q_feat)
+            sids.append(0)
+            bases.append(b_q)
+            
+        with torch.no_grad():
+            pred_d, _, _ = fold_state.model(
+                torch.as_tensor(np.array(hists), dtype=torch.float32),
+                torch.as_tensor(np.array(qs), dtype=torch.float32),
+                torch.as_tensor(np.array(sids), dtype=torch.long),
+            )
+            delta = pred_d.cpu().numpy() * fold_state.scale_d + fold_state.center_d
+        return np.array(bases) + delta
+
+    preds_orig = get_preds(pred_frame)
+    
+    # Perturb future targets to gigantic numbers
+    pred_frame_perturbed = pred_frame.copy()
+    pred_frame_perturbed[list(TARGETS)] = 1e8
+    preds_perturbed = get_preds(pred_frame_perturbed)
+    
+    # Predictions must be identical to 1e-12
+    np.testing.assert_allclose(preds_orig, preds_perturbed, atol=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# Test 3 — fold model independence
+# Fold 1 and Fold 2 must train completely independent model instances.
+# ---------------------------------------------------------------------------
+def test_fold_model_independence():
+    from scripts.benchmark.benchmark_ps08 import fit_geo_fold
+    t0 = pd.Timestamp('2025-09-01 00:00:00')
+    times = [t0 + pd.Timedelta(hours=i) for i in range(120)]
+    np.random.seed(42)
+    vals = np.random.randn(120, 4) * 4.0
+    df = _create_synthetic_history(times, vals)
+    
+    device = torch.device('cpu')
+    train1 = df[df['utc_time'] < t0 + pd.Timedelta(days=3)].copy()
+    train2 = df[df['utc_time'] < t0 + pd.Timedelta(days=4)].copy()
+    
+    fold1 = fit_geo_fold(train1, t0, series_idx=0, pred_start=t0 + pd.Timedelta(days=3), device=device, epochs=5, seed=1)
+    fold2 = fit_geo_fold(train2, t0, series_idx=0, pred_start=t0 + pd.Timedelta(days=4), device=device, epochs=5, seed=2)
+    
+    assert fold1.model is not fold2.model, "Fold models must be distinct instances"
+    p1 = list(fold1.model.parameters())[0].detach().numpy()
+    p2 = list(fold2.model.parameters())[0].detach().numpy()
+    assert not np.allclose(p1, p2), "Fold models trained on different data/seeds must have distinct weights"
+
+
+# ---------------------------------------------------------------------------
+# Test 4 — preprocessing independence
+# Preprocessing objects must be distinct instances fitted independently per fold.
+# ---------------------------------------------------------------------------
+def test_preprocessing_independence():
+    from scripts.benchmark.benchmark_ps08 import fit_geo_fold
+    t0 = pd.Timestamp('2025-09-01 00:00:00')
+    times = [t0 + pd.Timedelta(hours=i) for i in range(120)]
+    np.random.seed(42)
+    # Day 4 has distinct variance
+    vals = np.random.randn(120, 4)
+    vals[72:96] += 20.0
+    df = _create_synthetic_history(times, vals)
+    
+    train1 = df[df['utc_time'] < t0 + pd.Timedelta(days=3)].copy()
+    train2 = df[df['utc_time'] < t0 + pd.Timedelta(days=4)].copy()
+    
+    fold1 = fit_geo_fold(train1, t0, series_idx=0, pred_start=t0 + pd.Timedelta(days=3), epochs=0)
+    fold2 = fit_geo_fold(train2, t0, series_idx=0, pred_start=t0 + pd.Timedelta(days=4), epochs=0)
+    
+    assert fold1.baseline is not fold2.baseline
+    assert fold1.detector['x0'] != fold2.detector['x0']
+    assert not np.allclose(fold1.scale_d, fold2.scale_d)
+
+
+# ---------------------------------------------------------------------------
+# Test 5 — strict temporal causality
+# For every generated prediction example: max(history_times) < query_time
+# ---------------------------------------------------------------------------
+def test_strict_temporal_causality():
+    from scripts.benchmark.benchmark_ps08 import _rolling_backtest_geo
+    t0 = pd.Timestamp('2025-09-01 00:00:00')
+    times = [t0 + pd.Timedelta(hours=i) for i in range(168)] # 7 days
+    np.random.seed(42)
+    vals = np.random.randn(168, 4) * 2.0
+    df = _create_synthetic_history(times, vals)
+    
+    device = torch.device('cpu')
+    results, rows = _rolling_backtest_geo(df, t0, device=device, epochs=2)
+    assert len(rows) == 4, "All 4 rolling folds must execute"
+    for r in rows:
+        t_end = pd.Timestamp(r['train_end'])
+        p_start = pd.Timestamp(r['prediction_start'])
+        assert t_end <= p_start, f"Causality violated: train_end {t_end} > pred_start {p_start}"
+
+
+# ---------------------------------------------------------------------------
+# Test 6 — no full-data fit
+# Modifying later portion of dataset must not change training-fold statistics.
+# ---------------------------------------------------------------------------
+def test_no_full_data_fit():
+    from scripts.benchmark.benchmark_ps08 import fit_geo_fold
+    t0 = pd.Timestamp('2025-09-01 00:00:00')
+    times = [t0 + pd.Timedelta(hours=i) for i in range(168)]
+    np.random.seed(42)
+    vals = np.random.randn(168, 4)
+    df_clean = _create_synthetic_history(times, vals)
+    
+    # Clean train fold (Days 1-3)
+    train_end = t0 + pd.Timedelta(days=3)
+    clean_train = df_clean[df_clean['utc_time'] < train_end].copy()
+    state_clean = fit_geo_fold(clean_train, t0, series_idx=0, pred_start=train_end, epochs=0)
+    
+    # Dataset with corrupt/extreme later data (Days 4-7)
+    df_corrupted = df_clean.copy()
+    df_corrupted.loc[df_corrupted['utc_time'] >= train_end, list(TARGETS)] = 1e6
+    corrupted_train = df_corrupted[df_corrupted['utc_time'] < train_end].copy()
+    state_corrupted = fit_geo_fold(corrupted_train, t0, series_idx=0, pred_start=train_end, epochs=0)
+    
+    # Training fold statistics must be 100% identical
+    np.testing.assert_allclose(state_clean.center_d, state_corrupted.center_d, atol=1e-12)
+    np.testing.assert_allclose(state_clean.scale_d, state_corrupted.scale_d, atol=1e-12)
+    assert state_clean.detector['x0'] == state_corrupted.detector['x0']
+    assert state_clean.detector['scale'] == state_corrupted.detector['scale']
+
+

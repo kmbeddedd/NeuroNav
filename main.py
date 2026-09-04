@@ -10,13 +10,13 @@ if str(PROJECT_ROOT) not in sys.path:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="NeuroNav — Production GNSS Satellite Orbit & Clock Error Forecasting System",
+        description="NeuroNav - Production GNSS Satellite Orbit & Clock Error Forecasting System",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Commands:
   gui         Launch the desktop application (Tkinter GUI or headless demo)
   predict     Run production model inference via NeuroNavModel
-  train       Train neural forecasting models (bilstm, transformer, orbitiq)
+  train       Train neural forecasting models (bilstm, transformer)
   evaluate    Evaluate models and baseline forecasters
   audit       Audit telemetry dataset against data contract
   benchmark   Run official PS-08 competition benchmark
@@ -24,88 +24,69 @@ Commands:
     )
     subparsers = parser.add_subparsers(dest="command", help="Operational command to execute")
 
-    # Command: calibrate
-    cal_parser = subparsers.add_parser("calibrate", help="Calibrate models and select best per satellite")
-    cal_parser.add_argument("--train", required=True, help="Path to 7-day historical dataset")
-    cal_parser.add_argument("--test", required=True, help="Path to 8th-day ground truth dataset")
-    cal_parser.add_argument("--satellite", default=None, help="Target satellite name / identifier (e.g. GEO-01)")
-    cal_parser.add_argument("--report", default=None, help="Optional output dir for audit report")
-
     # Command: gui
     gui_parser = subparsers.add_parser("gui", help="Launch the Desktop GUI or headless demo")
     gui_parser.add_argument("--cli", action="store_true", help="Run in terminal headless demo mode")
-    gui_parser.add_argument("--model", default="auto", help="Model choice: 'auto' (per-satellite memory) or specific model")
-    gui_parser.add_argument("--data", default="data/sample/sample_gnss_data.csv")
+    gui_parser.add_argument("--model", default="bilstm", choices=["bilstm", "transformer"])
+    gui_parser.add_argument("--data", default=None)
 
     # Command: predict
     pred_parser = subparsers.add_parser("predict", help="Run multihorizon forecast inference")
-    pred_parser.add_argument("--model", default="auto", help="Model choice: 'auto' (per-satellite memory) or specific model")
-    pred_parser.add_argument("--data", default="data/sample/sample_gnss_data.csv")
+    pred_parser.add_argument("--model", default="bilstm", choices=["bilstm", "transformer"])
+    pred_parser.add_argument("--data", required=True)
     pred_parser.add_argument("--satellite", default=None, help="Optional satellite ID (e.g. G01)")
     pred_parser.add_argument("--output", default=None, help="Path to save forecast CSV")
 
     # Command: train
     train_parser = subparsers.add_parser("train", help="Train a neural forecaster")
-    train_parser.add_argument("model", choices=["bilstm", "transformer", "orbitiq", "tune"])
-    train_parser.add_argument("--data", default="data/benchmark/CLEAN_GNSS_BENCHMARK.csv")
+    train_parser.add_argument("model", choices=["bilstm", "transformer", "tune"])
+    train_parser.add_argument("--data", required=True)
     train_parser.add_argument("--epochs", type=int, default=30)
     train_parser.add_argument("--batch-size", type=int, default=32)
 
     # Command: evaluate
     eval_parser = subparsers.add_parser("evaluate", help="Evaluate models and baselines")
     eval_parser.add_argument("target", choices=["baselines", "orbitiq", "compare"])
-    eval_parser.add_argument("--data", default="data/benchmark/CLEAN_GNSS_BENCHMARK.csv")
+    eval_parser.add_argument("--data", required=True)
 
     # Command: audit
     audit_parser = subparsers.add_parser("audit", help="Audit dataset against data contract")
-    audit_parser.add_argument("--data", default="data/benchmark/CLEAN_GNSS_BENCHMARK.csv")
+    audit_parser.add_argument("--data", required=True)
     audit_parser.add_argument("--report", default=None)
     audit_parser.add_argument("--strict", action="store_true")
 
     # Command: benchmark
     bench_parser = subparsers.add_parser("benchmark", help="Run official PS-08 benchmark")
-    bench_parser.add_argument("--data-dir", default="research/ps08/data")
+    bench_parser.add_argument("--data-dir", default="data/ps08")
     bench_parser.add_argument("--output", default="research/ps08/results")
 
-    # If legacy syntax: python main.py --model auto
-    if len(sys.argv) > 1 and sys.argv[1].startswith("--"):
+    # If legacy syntax: python main.py --model bilstm
+    if (
+        len(sys.argv) > 1
+        and sys.argv[1].startswith("--")
+        and sys.argv[1] not in {"-h", "--help"}
+    ):
         # Legacy fallback compatibility
         legacy_parser = argparse.ArgumentParser()
-        legacy_parser.add_argument("--model", default="auto")
+        legacy_parser.add_argument("--model", default="bilstm")
         legacy_args, rem = legacy_parser.parse_known_args()
         sys.argv = [sys.argv[0], "gui", "--cli", "--model", legacy_args.model]
 
     args, remaining = parser.parse_known_args()
 
-    if args.command == "calibrate":
-        from app.controllers.inference_controller import InferenceController
-        controller = InferenceController()
-        sat_msg = f" for '{args.satellite}'" if args.satellite else " for detected satellites"
-        print(f"Calibrating all models{sat_msg} in {args.train} vs {args.test} (Zero Leakage)...")
-        res = controller.calibrate_satellite_models(args.train, args.test, target_satellite_id=args.satellite)
-        print("\n" + "=" * 65)
-        print("SATELLITE MODEL SELECTION RESULTS")
-        print("=" * 65)
-        for sat, info in res.get("satellites", {}).items():
-            print(f"Satellite: {sat:10s} | Best Model: {info['winner']:18s} | Score: {info['score']:.4f} | Mode: {info['selection_mode']}")
-        print("=" * 65)
-        if res.get("audit_reports"):
-            print(f"Audit report saved to: {res['audit_reports'].get('summary_json', '')}")
-
-    elif args.command == "gui" or args.command is None:
+    if args.command == "gui":
         from app.main import launch_gui, run_headless_demo
         from app.controllers.inference_controller import InferenceController
         controller = InferenceController()
-        target_model = getattr(args, 'model', 'auto')
-        target_data = getattr(args, 'data', 'data/sample/sample_gnss_data.csv')
-        is_cli = getattr(args, 'cli', False) or os.environ.get("HEADLESS") == "1"
-        if is_cli:
-            run_headless_demo(controller, target_model, target_data)
+        if args.cli or not sys.stdin.isatty():
+            if not args.data:
+                parser.error("gui --cli requires --data for the legacy inference contract")
+            run_headless_demo(controller, args.model, args.data)
         else:
             try:
                 launch_gui(controller)
             except Exception:
-                run_headless_demo(controller, target_model, target_data)
+                run_headless_demo(controller, args.model, args.data)
 
     elif args.command == "predict":
         from src.inference import NeuroNavModel
@@ -117,43 +98,43 @@ Commands:
             df.to_csv(out_p, index=False)
             print(f"Forecast saved to {out_p}")
         else:
-            display_cols = [c for c in ['forecast_step', 'utc_time', 'forecast_time', 'Satellite_ID', 'satellite_id', 'model_used', 'selection_mode', 'pred_Error_X', 'pred_Error_Y', 'pred_Error_Z', 'pred_Error_Clock', 'pred_3D_Orbit_Error'] if c in df.columns]
-            print(df[display_cols].head(20).to_string(index=False))
+            print(df.head(20).to_string())
 
     elif args.command == "train":
         if args.model == "bilstm":
             from scripts.train.bilstm import run_training
-            run_training()
+            run_training(["--data", args.data, "--epochs", str(args.epochs), "--batch-size", str(args.batch_size)])
         elif args.model == "transformer":
             from scripts.train.transformer import run_training
-            run_training()
-        elif args.model == "orbitiq":
-            from scripts.train.orbitiq import main as run_orbitiq
-            run_orbitiq()
+            run_training(["--data", args.data, "--epochs", str(args.epochs), "--batch-size", str(args.batch_size)])
         elif args.model == "tune":
             from scripts.train.tune import run_tuning
-            run_tuning()
+            run_tuning(["--data", args.data, "--epochs", str(args.epochs)])
 
     elif args.command == "evaluate":
         if args.target == "baselines":
             from scripts.evaluate.evaluate_baselines import main as run_baselines
-            sys.exit(run_baselines())
+            sys.exit(run_baselines(["--data", args.data]))
         elif args.target == "orbitiq":
             from scripts.evaluate.evaluate_orbitiq import main as run_orbitiq
-            run_orbitiq()
+            data_dir = str(Path(args.data).parent if Path(args.data).suffix else Path(args.data))
+            run_orbitiq(["--data-dir", data_dir])
         elif args.target == "compare":
             from scripts.evaluate.compare_models import main as run_comparison
-            run_comparison()
+            run_comparison([])
 
     elif args.command == "audit":
         from scripts.data.audit_data import main as run_audit
-        sys.argv = [sys.argv[0]] + remaining
-        run_audit()
+        audit_argv = ["--data", args.data]
+        if args.report:
+            audit_argv.extend(["--report", args.report])
+        if args.strict:
+            audit_argv.append("--strict")
+        run_audit(audit_argv)
 
     elif args.command == "benchmark":
         from scripts.benchmark.benchmark_ps08 import main as run_benchmark
-        sys.argv = [sys.argv[0]] + remaining
-        run_benchmark()
+        run_benchmark(["--data-dir", args.data_dir, "--output", args.output])
 
     else:
         parser.print_help()
