@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "status": "recovered_from_deployed_artifacts",
+  "objective": "official evaluation orbit 3D vector MAE in metres",
+  "seed": 42,
+  "best_value": 0.2672984120266745,
+  "best_params": {
+    "bilstm_units": 64,
+    "gru_units": 64,
+    "dropout_1": 0.2,
+    "dropout_2": 0.1,
+    "learning_rate": 0.001,
+    "batch_size": 32
+  },
+  "fixed_params": {
+    "seq_len": 96,
+    "forecast_horizon": 96,
+    "n_features": 21,
+    "output_dim": 4,
+    "epochs": 40,
+    "separate_orbit_clock_heads": true
+  },
+  "evaluation": {
+    "orbit_3d_vector_mae_m": 0.2672984120266745,
+    "orbit_3d_vector_rmse_m": 0.35069734849832696,
+    "clock_mae_m": 0.028436681566634717,
+    "sisre_mean_m": 0.10669375917274654,
+    "sisre_rms_m": 0.15109973524957895
+  },
+  "sources": [
+    "configs/bilstm.json",
+    "models/deploy/bilstm/manifest.json",
+    "models/registry/satellite_model_registry.json"
+  ],
+  "trials": [],
+  "notes": "The original Optuna output was absent. Values were recovered from the deployed BiLSTM configuration and official model-registry evaluation. The documented benchmark CSV required to rerun scripts/train/tune.py is not present in this checkout, so no synthetic trials were fabricated."
+}

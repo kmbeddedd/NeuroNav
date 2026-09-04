@@ -34,10 +34,44 @@ def test_load_transformer_model():
     assert model.uncertainty_supported is True
 
 
-def test_bilstm_predict_contract():
+@pytest.fixture(scope="module")
+def sample_data_path(tmp_path_factory):
+    """Creates a temporary synthetic GNSS telemetry CSV conforming to inference contracts."""
+    fn = tmp_path_factory.mktemp("sample_data") / "sample_gnss_data.csv"
+    rows = []
+    start_time = pd.Timestamp("2026-01-01 00:00:00")
+    for sat in ["G01", "G02"]:
+        for step in range(120):
+            t = start_time + pd.Timedelta(minutes=15 * step)
+            phase = 2 * np.pi * step / 96.0
+            rows.append({
+                "Timestamp": t.strftime("%Y-%m-%d %H:%M:%S"),
+                "Satellite_ID": sat,
+                "Error_X": float(np.sin(phase) * 1.5),
+                "Error_Y": float(np.cos(phase) * 1.2),
+                "Error_Z": float(np.sin(2 * phase) * 0.8),
+                "Error_Clock": float(0.05 * step),
+                "Broadcast_X": float(26000000.0 * np.cos(phase)),
+                "Broadcast_Y": float(26000000.0 * np.sin(phase)),
+                "Broadcast_Z": float(1000000.0 * np.sin(phase)),
+                "Broadcast_Clock": float(1e-5),
+                "Broadcast_VX": float(-3000.0 * np.sin(phase)),
+                "Broadcast_VY": float(3000.0 * np.cos(phase)),
+                "Broadcast_VZ": float(500.0),
+                "Broadcast_Clock_Drift": float(1e-11),
+                "Broadcast_Radius": float(26000000.0),
+                "Broadcast_Phase_Sin": float(np.sin(phase)),
+                "Broadcast_Phase_Cos": float(np.cos(phase)),
+            })
+    df = pd.DataFrame(rows)
+    df.to_csv(fn, index=False)
+    return str(fn)
+
+
+def test_bilstm_predict_contract(sample_data_path):
     """Verify BiLSTM multihorizon prediction conforms to inference output contract."""
     model = NeuroNavModel.load('bilstm')
-    df = model.predict('data/sample/sample_gnss_data.csv')
+    df = model.predict(sample_data_path)
 
     assert isinstance(df, pd.DataFrame)
     # 2 satellites in sample dataset * 96 forecast steps = 192 rows
@@ -63,10 +97,10 @@ def test_bilstm_predict_contract():
     assert np.allclose(df['pred_3D_Orbit_Error'], expected_3d, atol=1e-5), "Derived 3D error mismatch"
 
 
-def test_transformer_predict_uncertainty():
+def test_transformer_predict_uncertainty(sample_data_path):
     """Verify Transformer prediction generates valid calibrated uncertainty bounds."""
     model = NeuroNavModel.load('transformer')
-    df = model.predict('data/sample/sample_gnss_data.csv')
+    df = model.predict(sample_data_path)
 
     assert isinstance(df, pd.DataFrame)
     assert len(df) == 192
@@ -101,30 +135,30 @@ def test_input_validation_missing_columns():
         model.predict(invalid_df3)
 
 
-def test_input_validation_insufficient_history():
+def test_input_validation_insufficient_history(sample_data_path):
     """Verify input validation rejects sequences with fewer than seq_len observations."""
     model = NeuroNavModel.load('bilstm')
-    df = pd.read_csv('data/sample/sample_gnss_data.csv')
+    df = pd.read_csv(sample_data_path)
     short_df = df[df['Satellite_ID'] == 'G01'].iloc[:50].copy()
 
     with pytest.raises(ValueError, match="minimum lookback history of 96"):
         model.predict(short_df)
 
 
-def test_single_satellite_selection():
+def test_single_satellite_selection(sample_data_path):
     """Verify specifying satellite_id filters prediction to only that satellite."""
     model = NeuroNavModel.load('bilstm')
-    df = model.predict('data/sample/sample_gnss_data.csv', satellite_id='G01')
+    df = model.predict(sample_data_path, satellite_id='G01')
 
     assert isinstance(df, pd.DataFrame)
     assert len(df) == 96
     assert df['Satellite_ID'].unique().tolist() == ['G01']
 
 
-def test_prediction_result_dataclass():
+def test_prediction_result_dataclass(sample_data_path):
     """Verify returning raw PredictionResult dataclass objects."""
     model = NeuroNavModel.load('bilstm')
-    results = model.predict('data/sample/sample_gnss_data.csv', satellite_id='G02', return_dataframe=False)
+    results = model.predict(sample_data_path, satellite_id='G02', return_dataframe=False)
 
     assert isinstance(results, list)
     assert len(results) == 1
@@ -138,3 +172,4 @@ def test_prediction_result_dataclass():
     df_converted = res.to_dataframe()
     assert isinstance(df_converted, pd.DataFrame)
     assert len(df_converted) == 96
+

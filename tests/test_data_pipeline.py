@@ -8,13 +8,12 @@ import pandas as pd
 from src.data import load_and_clean_data, prepare_pytorch_datasets
 TARGETS = ['Error_X', 'Error_Y', 'Error_Z', 'Error_Clock']
 
-def synthetic_frame(epochs: int=80, *, sentinel_index: int | None=10, missing_index: int | None=None) -> pd.DataFrame:
+def synthetic_frame(epochs: int=80, *, invalid_clock_index: int | None=10, missing_index: int | None=None) -> pd.DataFrame:
     timestamps = pd.date_range('2025-01-01', periods=epochs, freq='15min')
     index = np.arange(epochs, dtype=np.float64)
     frame = pd.DataFrame({'Timestamp': timestamps, 'Satellite_ID': 'G01', 'Constellation': 'G', 'Broadcast_X': 20000000.0 + 1000.0 * index, 'Broadcast_Y': 15000000.0 - 400.0 * index, 'Broadcast_Z': 10000000.0 + 200.0 * index, 'Broadcast_Clock': 0.0002 + index * 1e-08, 'Modelled_Clock': 0.0002 + index * 5e-09, 'Error_X': 10.0 + 0.25 * index, 'Error_Y': -20.0 + 0.5 * index, 'Error_Z': np.sin(index / 5.0) * 3.0, 'Error_Clock': index * 5e-09, '3D_Orbit_Error': 25.0 + index})
-    if sentinel_index is not None:
-        frame.loc[sentinel_index, 'Modelled_Clock'] = 0.999999999999
-        frame.loc[sentinel_index, 'Error_Clock'] = frame.loc[sentinel_index, 'Broadcast_Clock'] - 0.999999999999
+    if invalid_clock_index is not None:
+        frame.loc[invalid_clock_index, 'Error_Clock'] = np.nan
     frame.loc[5, '3D_Orbit_Error'] = 100000.0
     if missing_index is not None:
         frame = frame.drop(index=missing_index).reset_index(drop=True)
@@ -30,18 +29,17 @@ class DataPipelineContractTests(unittest.TestCase):
     def prepare(self, path: Path):
         return prepare_pytorch_datasets(str(path), input_window=4, forecast_horizon=3, batch_size=8, train_end_date='2025-01-01 15:00:00', seed=7)
 
-    def test_sp3_clock_sentinel_is_masked_without_removing_row(self):
+    def test_non_finite_clock_is_masked_without_removing_row(self):
         frame = synthetic_frame()
         with tempfile.TemporaryDirectory() as directory:
             path = self.write_csv(frame, directory)
             train, test, satellites = load_and_clean_data(str(path), train_end_date='2025-01-01 15:00:00')
         combined = pd.concat([train, test], ignore_index=True)
-        sentinel = combined[combined['SP3_Clock_Sentinel']]
+        invalid = combined[~combined['Error_Clock_valid']]
         self.assertEqual(len(combined), len(frame))
         self.assertEqual(satellites, ['G01'])
-        self.assertEqual(len(sentinel), 1)
-        self.assertFalse(bool(sentinel.iloc[0]['Error_Clock_valid']))
-        self.assertTrue(np.isnan(sentinel.iloc[0]['Error_Clock']))
+        self.assertEqual(len(invalid), 1)
+        self.assertTrue(np.isnan(invalid.iloc[0]['Error_Clock']))
         self.assertEqual(int((combined['3D_Orbit_Error'] >= 50000).sum()), 1)
 
     def test_targets_are_scaled_once_and_invalid_clock_never_trains(self):
@@ -51,7 +49,7 @@ class DataPipelineContractTests(unittest.TestCase):
             path = self.write_csv(frame, directory)
             bundle = self.prepare(path)
         fit_end = pd.Timestamp(bundle['split_metadata']['scaler_fit_end_exclusive'])
-        expected_clock_mean = frame.loc[(frame['Timestamp'] < fit_end) & ~np.isclose(frame['Modelled_Clock'], 0.999999999999, atol=1e-09, rtol=0), 'Error_Clock'].mean()
+        expected_clock_mean = frame.loc[frame['Timestamp'] < fit_end, 'Error_Clock'].mean()
         self.assertAlmostEqual(bundle['target_scaler'].mean_[3], expected_clock_mean)
         expected_x_mean = frame.loc[frame['Timestamp'] < fit_end, 'Error_X'].mean()
         self.assertAlmostEqual(bundle['target_scaler'].mean_[0], expected_x_mean)
@@ -82,7 +80,7 @@ class DataPipelineContractTests(unittest.TestCase):
         self.assertTrue(saw_invalid_clock)
 
     def test_every_emitted_window_is_contiguous_even_when_source_has_gap(self):
-        frame = synthetic_frame(sentinel_index=None, missing_index=25)
+        frame = synthetic_frame(invalid_clock_index=None, missing_index=25)
         with tempfile.TemporaryDirectory() as directory:
             path = self.write_csv(frame, directory)
             bundle = self.prepare(path)
@@ -105,7 +103,7 @@ class DataPipelineContractTests(unittest.TestCase):
         self.assertGreater(bundle['split_metadata']['purged_boundary_windows'], 0)
 
     def test_insufficient_history_has_actionable_error(self):
-        frame = synthetic_frame(epochs=10, sentinel_index=None)
+        frame = synthetic_frame(epochs=10, invalid_clock_index=None)
         with tempfile.TemporaryDirectory() as directory:
             path = self.write_csv(frame, directory)
             with self.assertRaisesRegex(ValueError, 'Insufficient history'):

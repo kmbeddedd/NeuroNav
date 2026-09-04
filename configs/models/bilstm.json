@@ -1,0 +1,16 @@
+{
+  "model_name": "GNSS-BiLSTM-GRU",
+  "model_type": "bilstm",
+  "seq_len": 96,
+  "forecast_horizon": 96,
+  "n_features": 21,
+  "output_dim": 4,
+  "bilstm_units": 64,
+  "gru_units": 64,
+  "dropout_1": 0.2,
+  "dropout_2": 0.1,
+  "separate_orbit_clock_heads": true,
+  "learning_rate": 0.001,
+  "batch_size": 32,
+  "epochs": 40
+}

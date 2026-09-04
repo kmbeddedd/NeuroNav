@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "google-colab": {
+      "command": "C:\\Users\\kunal\\AppData\\Local\\Python\\pythoncore-3.14-64\\Scripts\\google-colab-mcp.exe",
+      "args": []
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "description": "Canonical output contract returned by the satellite-specific prediction router",
+  "required_columns": {
+    "forecast_step": "one-based forecast index",
+    "timestamp": "forecast UTC epoch",
+    "satellite_id": "registered satellite identifier",
+    "predicted_X": "ECEF X error in metres",
+    "predicted_Y": "ECEF Y error in metres",
+    "predicted_Z": "ECEF Z error in metres",
+    "predicted_Clock": "clock range error in metres",
+    "pred_3D_Orbit_Error": "Euclidean norm of predicted X/Y/Z error in metres",
+    "model_used": "canonical registry model name",
+    "model_version": "artifact model version",
+    "selection_mode": "automatic or manual"
+  },
+  "optional_columns": {
+    "predicted_R": "radial error in metres",
+    "predicted_I": "in-track error in metres",
+    "predicted_C": "cross-track error in metres"
+  },
+  "fallback_policy": "fail closed when the satellite, model, or artifact is unavailable"
+}

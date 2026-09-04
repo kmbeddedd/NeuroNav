@@ -10,13 +10,13 @@ if str(PROJECT_ROOT) not in sys.path:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="NeuroNav — Production GNSS Satellite Orbit & Clock Error Forecasting System",
+        description="NeuroNav - Production GNSS Satellite Orbit & Clock Error Forecasting System",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Commands:
   gui         Launch the desktop application (Tkinter GUI or headless demo)
   predict     Run production model inference via NeuroNavModel
-  train       Train neural forecasting models (bilstm, transformer, orbitiq)
+  train       Train neural forecasting models (bilstm, transformer)
   evaluate    Evaluate models and baseline forecasters
   audit       Audit telemetry dataset against data contract
   benchmark   Run official PS-08 competition benchmark
@@ -28,40 +28,44 @@ Commands:
     gui_parser = subparsers.add_parser("gui", help="Launch the Desktop GUI or headless demo")
     gui_parser.add_argument("--cli", action="store_true", help="Run in terminal headless demo mode")
     gui_parser.add_argument("--model", default="bilstm", choices=["bilstm", "transformer"])
-    gui_parser.add_argument("--data", default="data/sample/sample_gnss_data.csv")
+    gui_parser.add_argument("--data", default=None)
 
     # Command: predict
     pred_parser = subparsers.add_parser("predict", help="Run multihorizon forecast inference")
     pred_parser.add_argument("--model", default="bilstm", choices=["bilstm", "transformer"])
-    pred_parser.add_argument("--data", default="data/sample/sample_gnss_data.csv")
+    pred_parser.add_argument("--data", required=True)
     pred_parser.add_argument("--satellite", default=None, help="Optional satellite ID (e.g. G01)")
     pred_parser.add_argument("--output", default=None, help="Path to save forecast CSV")
 
     # Command: train
     train_parser = subparsers.add_parser("train", help="Train a neural forecaster")
-    train_parser.add_argument("model", choices=["bilstm", "transformer", "orbitiq", "tune"])
-    train_parser.add_argument("--data", default="data/benchmark/CLEAN_GNSS_BENCHMARK.csv")
+    train_parser.add_argument("model", choices=["bilstm", "transformer", "tune"])
+    train_parser.add_argument("--data", required=True)
     train_parser.add_argument("--epochs", type=int, default=30)
     train_parser.add_argument("--batch-size", type=int, default=32)
 
     # Command: evaluate
     eval_parser = subparsers.add_parser("evaluate", help="Evaluate models and baselines")
     eval_parser.add_argument("target", choices=["baselines", "orbitiq", "compare"])
-    eval_parser.add_argument("--data", default="data/benchmark/CLEAN_GNSS_BENCHMARK.csv")
+    eval_parser.add_argument("--data", required=True)
 
     # Command: audit
     audit_parser = subparsers.add_parser("audit", help="Audit dataset against data contract")
-    audit_parser.add_argument("--data", default="data/benchmark/CLEAN_GNSS_BENCHMARK.csv")
+    audit_parser.add_argument("--data", required=True)
     audit_parser.add_argument("--report", default=None)
     audit_parser.add_argument("--strict", action="store_true")
 
     # Command: benchmark
     bench_parser = subparsers.add_parser("benchmark", help="Run official PS-08 benchmark")
-    bench_parser.add_argument("--data-dir", default="research/ps08/data")
+    bench_parser.add_argument("--data-dir", default="data/ps08")
     bench_parser.add_argument("--output", default="research/ps08/results")
 
     # If legacy syntax: python main.py --model bilstm
-    if len(sys.argv) > 1 and sys.argv[1].startswith("--"):
+    if (
+        len(sys.argv) > 1
+        and sys.argv[1].startswith("--")
+        and sys.argv[1] not in {"-h", "--help"}
+    ):
         # Legacy fallback compatibility
         legacy_parser = argparse.ArgumentParser()
         legacy_parser.add_argument("--model", default="bilstm")
@@ -75,6 +79,8 @@ Commands:
         from app.controllers.inference_controller import InferenceController
         controller = InferenceController()
         if args.cli or not sys.stdin.isatty():
+            if not args.data:
+                parser.error("gui --cli requires --data for the legacy inference contract")
             run_headless_demo(controller, args.model, args.data)
         else:
             try:
@@ -97,37 +103,38 @@ Commands:
     elif args.command == "train":
         if args.model == "bilstm":
             from scripts.train.bilstm import run_training
-            run_training()
+            run_training(["--data", args.data, "--epochs", str(args.epochs), "--batch-size", str(args.batch_size)])
         elif args.model == "transformer":
             from scripts.train.transformer import run_training
-            run_training()
-        elif args.model == "orbitiq":
-            from scripts.train.orbitiq import main as run_orbitiq
-            run_orbitiq()
+            run_training(["--data", args.data, "--epochs", str(args.epochs), "--batch-size", str(args.batch_size)])
         elif args.model == "tune":
             from scripts.train.tune import run_tuning
-            run_tuning()
+            run_tuning(["--data", args.data, "--epochs", str(args.epochs)])
 
     elif args.command == "evaluate":
         if args.target == "baselines":
             from scripts.evaluate.evaluate_baselines import main as run_baselines
-            sys.exit(run_baselines())
+            sys.exit(run_baselines(["--data", args.data]))
         elif args.target == "orbitiq":
             from scripts.evaluate.evaluate_orbitiq import main as run_orbitiq
-            run_orbitiq()
+            data_dir = str(Path(args.data).parent if Path(args.data).suffix else Path(args.data))
+            run_orbitiq(["--data-dir", data_dir])
         elif args.target == "compare":
             from scripts.evaluate.compare_models import main as run_comparison
-            run_comparison()
+            run_comparison([])
 
     elif args.command == "audit":
         from scripts.data.audit_data import main as run_audit
-        sys.argv = [sys.argv[0]] + remaining
-        run_audit()
+        audit_argv = ["--data", args.data]
+        if args.report:
+            audit_argv.extend(["--report", args.report])
+        if args.strict:
+            audit_argv.append("--strict")
+        run_audit(audit_argv)
 
     elif args.command == "benchmark":
         from scripts.benchmark.benchmark_ps08 import main as run_benchmark
-        sys.argv = [sys.argv[0]] + remaining
-        run_benchmark()
+        run_benchmark(["--data-dir", args.data_dir, "--output", args.output])
 
     else:
         parser.print_help()
