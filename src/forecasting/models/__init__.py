@@ -14,11 +14,43 @@ from src.forecasting.models.persistence import PersistenceModel
 from src.forecasting.models.random_forest import RandomForestModel
 from src.forecasting.models.transformer import TransformerModel
 
+class RandomForestSRPModel(RandomForestModel):
+    """Random Forest variant with explicit SRP solar radiation physics features."""
+    def __init__(self, name: str = "Random Forest + SRP", **kwargs):
+        kwargs.setdefault("enable_srp", True)
+        super().__init__(name=name, **kwargs)
+
+
+class RandomForestRICModel(RandomForestModel):
+    """Random Forest variant with explicit RIC coordinate features."""
+    def __init__(self, name: str = "Random Forest + RIC", **kwargs):
+        kwargs.setdefault("use_ric", True)
+        super().__init__(name=name, **kwargs)
+
+
+class HarmonicRidgeSRPModel(HarmonicRidgeModel):
+    """Harmonic Ridge variant with explicit SRP physics features."""
+    def __init__(self, name: str = "Harmonic Ridge + SRP", **kwargs):
+        kwargs.setdefault("use_srp", True)
+        super().__init__(name=name, **kwargs)
+
+
+class HarmonicRidgeRICModel(HarmonicRidgeModel):
+    """Harmonic Ridge variant with explicit RIC coordinate features."""
+    def __init__(self, name: str = "Harmonic Ridge + RIC", **kwargs):
+        kwargs.setdefault("use_ric", True)
+        super().__init__(name=name, **kwargs)
+
+
 # Canonical Model Registry
 MODEL_REGISTRY: Dict[str, Type[ForecastModel]] = {
     "persistence": PersistenceModel,
     "harmonic_ridge": HarmonicRidgeModel,
+    "harmonic_ridge_srp": HarmonicRidgeSRPModel,
+    "harmonic_ridge_ric": HarmonicRidgeRICModel,
     "random_forest": RandomForestModel,
+    "random_forest_srp": RandomForestSRPModel,
+    "random_forest_ric": RandomForestRICModel,
     "gaussian_process": GaussianProcessModel,
     "geo_moe": GEOGatedMoEModel,
     "bilstm_gru": BiLSTMGRUModel,
@@ -33,8 +65,16 @@ MODEL_ALIASES: Dict[str, str] = {
     "harmonic_ridge": "harmonic_ridge",
     "harmonic": "harmonic_ridge",
     "ridge": "harmonic_ridge",
+    "harmonic_ridge_srp": "harmonic_ridge_srp",
+    "ridge_srp": "harmonic_ridge_srp",
+    "harmonic_ridge_ric": "harmonic_ridge_ric",
+    "ridge_ric": "harmonic_ridge_ric",
     "random_forest": "random_forest",
     "rf": "random_forest",
+    "random_forest_srp": "random_forest_srp",
+    "rf_srp": "random_forest_srp",
+    "random_forest_ric": "random_forest_ric",
+    "rf_ric": "random_forest_ric",
     "gaussian_process": "gaussian_process",
     "gp": "gaussian_process",
     "geo_moe": "geo_moe",

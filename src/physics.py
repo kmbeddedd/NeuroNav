@@ -1,6 +1,11 @@
 from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from typing import Dict, List, Optional, Sequence, Tuple, Union
+
 import numpy as np
 import pandas as pd
+
 SPEED_OF_LIGHT_M_S = 299792458.0
 
 def _unit(vector: np.ndarray, eps: float=1e-12) -> np.ndarray:
@@ -107,64 +112,302 @@ def fit_harmonic_orbit_baseline(
     return A_out @ w
 
 
-def nominal_satellite_orbit(
-    timestamps: np.ndarray | pd.DatetimeIndex,
-    orbit_class: str = 'MEO',
-    satellite_id: str = '',
-) -> tuple[np.ndarray, np.ndarray]:
+class OrbitalStateProvider(ABC):
+    """Abstract provider interface for satellite orbital position and velocity state."""
+
+    @property
+    @abstractmethod
+    def source_name(self) -> str:
+        """Identifier describing the origin and physical fidelity of the orbital state."""
+        pass
+
+    @abstractmethod
+    def get_state(
+        self,
+        timestamps: Sequence[pd.Timestamp] | pd.DatetimeIndex,
+        satellite_id: str = "",
+        orbit_class: str = "MEO",
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Returns (position_ecef, velocity_ecef) in metres and metres/second.
+
+        Both arrays share shape (N, 3).
+        """
+        pass
+
+
+class NominalStateProvider(OrbitalStateProvider):
+    """Generates nominal analytical orbital state vectors for geometric transformations.
+
+    NOTE: This is an explicitly approximate geometry fallback for datasets that contain
+    only error residuals (X, Y, Z, Clock) and lack actual broadcast or precise ephemeris.
+    Physical fidelity is nominal/approximate and does not represent measured ephemeris.
+    """
+
+    def __init__(self, geo_longitude_deg: float = 0.0):
+        self.geo_longitude_deg = geo_longitude_deg
+
+    @property
+    def source_name(self) -> str:
+        return "nominal_approximation"
+
+    def get_state(
+        self,
+        timestamps: Sequence[pd.Timestamp] | pd.DatetimeIndex,
+        satellite_id: str = "",
+        orbit_class: str = "MEO",
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        ts = pd.DatetimeIndex(pd.to_datetime(timestamps))
+        if len(ts) == 0:
+            return np.empty((0, 3), dtype=np.float64), np.empty((0, 3), dtype=np.float64)
+
+        elapsed_sec = (ts - ts[0]).total_seconds().to_numpy(dtype=np.float64)
+        n_epochs = len(ts)
+        orbit_type = str(orbit_class).upper()
+
+        if "GEO" in orbit_type or "GEO" in satellite_id.upper():
+            # Geostationary Earth Orbit (circular, equatorial):
+            # In an Earth-Centered Earth-Fixed (ECEF) frame, an idealized geostationary satellite
+            # is stationary relative to Earth's rotating surface at its nominal subsatellite
+            # longitude lambda_0 on the equatorial plane (z = 0).
+            # Nominal geostationary orbital radius: R ~ 42,164,140 m.
+            # Its ECEF position is stationary: [R * cos(lambda_0), R * sin(lambda_0), 0].
+            # To construct the physical orbital frame (RIC basis), the in-track (along-track)
+            # direction is defined by the satellite's eastward prograde orbital motion in space.
+            # Angular velocity magnitude: omega_Earth = 7.292115e-5 rad/s (WGS84).
+            # Inertial velocity projected in ECEF frame gives: [-v_orb * sin(lambda_0), v_orb * cos(lambda_0), 0].
+            r_mag = 42164140.0  # metres
+            omega_earth = 7.292115e-5  # rad/s
+            v_orb = omega_earth * r_mag  # ~ 3074.6 m/s
+            lam_rad = np.radians(self.geo_longitude_deg)
+
+            pos_x = np.full(n_epochs, r_mag * np.cos(lam_rad), dtype=np.float64)
+            pos_y = np.full(n_epochs, r_mag * np.sin(lam_rad), dtype=np.float64)
+            pos_z = np.zeros(n_epochs, dtype=np.float64)
+
+            vel_x = np.full(n_epochs, -v_orb * np.sin(lam_rad), dtype=np.float64)
+            vel_y = np.full(n_epochs, v_orb * np.cos(lam_rad), dtype=np.float64)
+            vel_z = np.zeros(n_epochs, dtype=np.float64)
+
+        else:
+            # Medium Earth Orbit (GPS/Galileo nominal Keplerian model):
+            # Semi-major axis a ~ 26,560 km, inclination i ~ 55 deg, period T ~ 43,082 s (11h 58m).
+            # Documented nominal approximation with elapsed phase from initial epoch.
+            a_mag = 26560000.0  # metres
+            period_sec = 43082.0
+            omega = 2.0 * np.pi / period_sec
+            inc_rad = np.radians(55.0)
+            phase = omega * elapsed_sec
+
+            # Orbital plane coordinates
+            x_orb = a_mag * np.cos(phase)
+            y_orb = a_mag * np.sin(phase)
+            vx_orb = -a_mag * omega * np.sin(phase)
+            vy_orb = a_mag * omega * np.cos(phase)
+
+            # Rotate by inclination around X-axis into equatorial plane
+            pos_x = x_orb
+            pos_y = y_orb * np.cos(inc_rad)
+            pos_z = y_orb * np.sin(inc_rad)
+
+            vel_x = vx_orb
+            vel_y = vy_orb * np.cos(inc_rad)
+            vel_z = vy_orb * np.sin(inc_rad)
+
+        position_ecef = np.column_stack([pos_x, pos_y, pos_z])
+        velocity_ecef = np.column_stack([vel_x, vel_y, vel_z])
+        return position_ecef, velocity_ecef
+
+
+class ProvidedStateProvider(OrbitalStateProvider):
+    """Provides orbital state vectors from a supplied ephemeris or orbit-state table.
+
+    Accepts a DataFrame containing position and velocity columns:
+      - Timestamp index or 'utc_time' column
+      - position_x, position_y, position_z (or x, y, z)
+      - velocity_x, velocity_y, velocity_z (or vx, vy, vz)
+    Interpolates linearly to requested timestamps.
+    """
+
+    def __init__(self, state_df: pd.DataFrame):
+        df = state_df.copy()
+        if "utc_time" in df.columns:
+            df["utc_time"] = pd.to_datetime(df["utc_time"])
+            df = df.set_index("utc_time")
+        elif not isinstance(df.index, pd.DatetimeIndex):
+            df.index = pd.to_datetime(df.index)
+        self.state_df = df.sort_index()
+
+    @property
+    def source_name(self) -> str:
+        return "provided"
+
+    def get_state(
+        self,
+        timestamps: Sequence[pd.Timestamp] | pd.DatetimeIndex,
+        satellite_id: str = "",
+        orbit_class: str = "MEO",
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        ts = pd.DatetimeIndex(pd.to_datetime(timestamps))
+        if len(ts) == 0:
+            return np.empty((0, 3), dtype=np.float64), np.empty((0, 3), dtype=np.float64)
+
+        cols = {c.lower(): c for c in self.state_df.columns}
+        pos_cols = [
+            cols.get("position_x", cols.get("x", None)),
+            cols.get("position_y", cols.get("y", None)),
+            cols.get("position_z", cols.get("z", None)),
+        ]
+        vel_cols = [
+            cols.get("velocity_x", cols.get("vx", None)),
+            cols.get("velocity_y", cols.get("vy", None)),
+            cols.get("velocity_z", cols.get("vz", None)),
+        ]
+
+        if any(c is None for c in pos_cols):
+            raise ValueError(f"state_df missing required position columns: {list(self.state_df.columns)}")
+
+        src_times = (self.state_df.index - self.state_df.index[0]).total_seconds().to_numpy(dtype=np.float64)
+        target_times = (ts - self.state_df.index[0]).total_seconds().to_numpy(dtype=np.float64)
+
+        pos_res = np.column_stack([
+            np.interp(target_times, src_times, self.state_df[col].to_numpy(dtype=np.float64))
+            for col in pos_cols
+        ])
+
+        if all(c is not None for c in vel_cols):
+            vel_res = np.column_stack([
+                np.interp(target_times, src_times, self.state_df[col].to_numpy(dtype=np.float64))
+                for col in vel_cols
+            ])
+        else:
+            if len(target_times) > 1:
+                vel_res = np.gradient(pos_res, target_times, axis=0)
+            else:
+                vel_res = np.zeros_like(pos_res)
+
+        return pos_res, vel_res
+
+
+def approximate_nominal_orbit(
+    timestamps: Sequence[pd.Timestamp] | pd.DatetimeIndex,
+    orbit_class: str = "MEO",
+    satellite_id: str = "",
+) -> Tuple[np.ndarray, np.ndarray]:
     """Generates nominal ECEF position and velocity vectors for orbit frame reconstruction.
-    
-    Used when empirical telemetry provides error residuals (X, Y, Z, Clock) but lacks
-    explicit broadcast coordinates, enabling accurate ECEF <-> RIC frame rotations.
+
+    NOTE: This is an explicitly approximate geometry fallback. Never represents measured ephemeris.
+    """
+    provider = NominalStateProvider()
+    return provider.get_state(timestamps, satellite_id=satellite_id, orbit_class=orbit_class)
+
+
+# Backwards compatibility alias
+nominal_satellite_orbit = approximate_nominal_orbit
+
+
+def get_orbital_state_provider(source: str = "nominal_approximation", **kwargs) -> OrbitalStateProvider:
+    """Factory resolving configured OrbitalStateProvider instance."""
+    if source in ("nominal", "nominal_approximation"):
+        return NominalStateProvider(**kwargs)
+    if source == "provided":
+        state_df = kwargs.get("state_df")
+        if state_df is None:
+            raise ValueError("ProvidedStateProvider requires 'state_df' parameter.")
+        return ProvidedStateProvider(state_df=state_df)
+    raise ValueError(f"Unknown orbital state provider source: '{source}'")
+
+
+def build_ric_features(
+    error_ecef_df: pd.DataFrame,
+    timestamps: Sequence[pd.Timestamp] | pd.DatetimeIndex,
+    provider: Optional[OrbitalStateProvider] = None,
+    satellite_id: str = "",
+    orbit_class: str = "MEO",
+) -> pd.DataFrame:
+    """Computes Radial, In-track, Cross-track (RIC) error features from ECEF errors.
+
+    Args:
+        error_ecef_df: DataFrame containing 'x_error_m', 'y_error_m', 'z_error_m'.
+        timestamps: Associated observation timestamps.
+        provider: OrbitalStateProvider instance (defaults to NominalStateProvider).
+        satellite_id: Satellite identifier.
+        orbit_class: 'GEO', 'MEO', etc.
+
+    Returns:
+        DataFrame with columns ['ric_r', 'ric_i', 'ric_c'].
     """
     ts = pd.DatetimeIndex(pd.to_datetime(timestamps))
-    elapsed_sec = (ts - ts[0]).total_seconds().to_numpy(dtype=np.float64)
-    n_epochs = len(ts)
-    orbit_type = str(orbit_class).upper()
+    state_provider = provider or get_orbital_state_provider("nominal_approximation")
+    pos, vel = state_provider.get_state(ts, satellite_id=satellite_id, orbit_class=orbit_class)
 
-    if 'GEO' in orbit_type or 'GEO' in satellite_id.upper():
-        # Geostationary Earth Orbit: R ~ 42164 km, circular equatorial (T ~ 86164.1 s)
-        r_mag = 42164140.0  # metres
-        period_sec = 86164.09
-        omega = 2.0 * np.pi / period_sec
-        phase = omega * elapsed_sec
+    req_cols = ["x_error_m", "y_error_m", "z_error_m"]
+    for c in req_cols:
+        if c not in error_ecef_df.columns:
+            raise ValueError(f"Missing required ECEF error column: '{c}'")
 
-        # Equatorial circular position
-        pos_x = r_mag * np.cos(phase)
-        pos_y = r_mag * np.sin(phase)
-        pos_z = np.zeros(n_epochs, dtype=np.float64)
+    err_ecef = error_ecef_df[req_cols].to_numpy(dtype=np.float64)
+    ric_err = ecef_error_to_ric(err_ecef, pos, vel)
 
-        # Velocity: v = omega * r
-        vel_x = -r_mag * omega * np.sin(phase)
-        vel_y = r_mag * omega * np.cos(phase)
-        vel_z = np.zeros(n_epochs, dtype=np.float64)
+    return pd.DataFrame(
+        ric_err,
+        columns=["ric_r", "ric_i", "ric_c"],
+        index=error_ecef_df.index,
+    )
 
-    else:
-        # Medium Earth Orbit (GPS/Galileo nominal): a ~ 26560 km, i ~ 55 deg, T ~ 12 hrs
-        a_mag = 26560000.0  # metres
-        period_sec = 43082.0
-        omega = 2.0 * np.pi / period_sec
-        inc_rad = np.radians(55.0)
-        phase = omega * elapsed_sec
 
-        # Orbital plane coordinates
-        x_orb = a_mag * np.cos(phase)
-        y_orb = a_mag * np.sin(phase)
-        vx_orb = -a_mag * omega * np.sin(phase)
-        vy_orb = a_mag * omega * np.cos(phase)
+def build_physics_features(
+    timestamps: Sequence[pd.Timestamp] | pd.DatetimeIndex,
+    orbital_state_provider: Optional[OrbitalStateProvider] = None,
+    satellite_id: str = "",
+    orbit_class: str = "MEO",
+    features: Tuple[str, ...] = ("sun_beta_angle", "shadow_factor", "solar_cos_angle"),
+) -> pd.DataFrame:
+    """Constructs deterministic physics and solar geometry features for model ingestion.
 
-        # Rotate by inclination around X-axis
-        pos_x = x_orb
-        pos_y = y_orb * np.cos(inc_rad)
-        pos_z = y_orb * np.sin(inc_rad)
+    Guarantees strict training/inference parity and zero target error leakage.
 
-        vel_x = vx_orb
-        vel_y = vy_orb * np.cos(inc_rad)
-        vel_z = vy_orb * np.sin(inc_rad)
+    Features:
+      - sun_beta_angle (deg): Elevation angle of Sun above orbital plane [-90.0, +90.0].
+      - shadow_factor (fraction): Cylindrical/conical Earth eclipse factor [0.0, 1.0].
+      - solar_cos_angle (cosine): Cosine of angle between geocentric satellite position and Sun [-1.0, 1.0].
+    """
+    ts = pd.DatetimeIndex(pd.to_datetime(timestamps))
+    feature_list = list(features)
+    if len(ts) == 0:
+        return pd.DataFrame(columns=feature_list)
+    if ts.isna().any():
+        raise ValueError("timestamps contains null or unparsable values")
 
-    position_ecef = np.column_stack([pos_x, pos_y, pos_z])
-    velocity_ecef = np.column_stack([vel_x, vel_y, vel_z])
-    return position_ecef, velocity_ecef
+    provider = orbital_state_provider or get_orbital_state_provider("nominal_approximation")
+    pos, vel = provider.get_state(ts, satellite_id=satellite_id, orbit_class=orbit_class)
+
+    if len(pos) != len(ts) or pos.shape[-1] != 3:
+        raise ValueError(f"Invalid position shape: {pos.shape}, expected ({len(ts)}, 3)")
+
+    # Validate non-zero vectors
+    pos_norm = np.linalg.norm(pos, axis=-1)
+    if np.any(pos_norm < 1.0):
+        raise ValueError("Orbital position vector contains near-zero lengths (< 1.0 m)")
+
+    data: Dict[str, np.ndarray] = {}
+    for f in feature_list:
+        if f == "sun_beta_angle":
+            beta = compute_sun_beta_angle(pos, vel, ts)
+            data["sun_beta_angle"] = np.clip(beta, -90.0, 90.0)
+        elif f == "shadow_factor":
+            shadow = compute_shadow_factor(pos, ts)
+            data["shadow_factor"] = np.clip(shadow, 0.0, 1.0)
+        elif f == "solar_cos_angle":
+            cos_ang = compute_solar_cos_angle(pos, ts)
+            data["solar_cos_angle"] = np.clip(cos_ang, -1.0, 1.0)
+        else:
+            raise ValueError(f"Unsupported physics feature: '{f}'")
+
+    df_phys = pd.DataFrame(data, index=ts)
+    if not np.all(np.isfinite(df_phys.to_numpy())):
+        raise ValueError("Generated physics features contain non-finite values")
+    return df_phys
+
 
 
 def compute_sun_beta_angle(

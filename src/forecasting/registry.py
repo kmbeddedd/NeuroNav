@@ -48,6 +48,15 @@ class SatelliteSelection:
     supplementary_diagnostics: Dict[str, Any] = field(default_factory=dict)
     feature_config: Dict[str, Any] = field(default_factory=dict)
     lookback_config: Dict[str, Any] = field(default_factory=dict)
+    physics_features: List[str] = field(default_factory=list)
+    orbit_state_source: str = "nominal_approximation"
+    orbit_type: str = "UNKNOWN"
+    use_ric: bool = False
+    use_srp: bool = False
+    cadence_minutes: float = 15.0
+    sequence_length: int = 96
+    forecast_horizon: int = 96
+    feature_manifest: Dict[str, Any] = field(default_factory=dict)
     history: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -74,8 +83,27 @@ class SatelliteSelection:
             supplementary_diagnostics=data.get("supplementary_diagnostics", {}),
             feature_config=data.get("feature_config", {}),
             lookback_config=data.get("lookback_config", {}),
+            physics_features=data.get("physics_features", []),
+            orbit_state_source=data.get("orbit_state_source", "nominal_approximation"),
+            orbit_type=data.get("orbit_type", "UNKNOWN"),
+            use_ric=bool(data.get("use_ric", False)),
+            use_srp=bool(data.get("use_srp", False)),
+            cadence_minutes=float(data.get("cadence_minutes", 15.0)),
+            sequence_length=int(data.get("sequence_length", 96)),
+            forecast_horizon=int(data.get("forecast_horizon", 96)),
+            feature_manifest=data.get("feature_manifest", {}),
             history=data.get("history", []),
         )
+
+
+def get_satellite_artifact_dir(
+    satellite_id: str,
+    base_dir: Union[str, Path] = "models/registry/artifacts",
+) -> Path:
+    """Returns the dedicated per-satellite artifact directory path."""
+    path = Path(base_dir) / "satellites" / satellite_id
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 class SatelliteModelRegistry:
@@ -161,6 +189,15 @@ class SatelliteModelRegistry:
         supplementary_diagnostics: Optional[Dict[str, Any]] = None,
         feature_config: Optional[Dict[str, Any]] = None,
         lookback_config: Optional[Dict[str, Any]] = None,
+        physics_features: Optional[List[str]] = None,
+        orbit_state_source: str = "nominal_approximation",
+        orbit_type: str = "UNKNOWN",
+        use_ric: bool = False,
+        use_srp: bool = False,
+        cadence_minutes: float = 15.0,
+        sequence_length: int = 96,
+        forecast_horizon: int = 96,
+        feature_manifest: Optional[Dict[str, Any]] = None,
     ) -> SatelliteSelection:
         """Registers the winner of an automatic calibration run.
         
@@ -222,6 +259,15 @@ class SatelliteModelRegistry:
             supplementary_diagnostics=supplementary_diagnostics or {},
             feature_config=feature_config or {},
             lookback_config=lookback_config or {},
+            physics_features=physics_features or [],
+            orbit_state_source=orbit_state_source,
+            orbit_type=orbit_type,
+            use_ric=use_ric,
+            use_srp=use_srp,
+            cadence_minutes=cadence_minutes,
+            sequence_length=sequence_length,
+            forecast_horizon=forecast_horizon,
+            feature_manifest=feature_manifest or {},
             history=history,
         )
         self.satellites[satellite_id] = new_selection

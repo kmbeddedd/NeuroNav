@@ -21,6 +21,8 @@ class ModelMetadata:
     lookback_steps: int = 16
     forecast_horizon: int = 96
     features: List[str] = field(default_factory=list)
+    requires_physics_features: bool = False
+    physics_features: List[str] = field(default_factory=list)
     target_representation: str = "ECEF"  # "ECEF" or "RIC"
     supports_uncertainty: bool = False
     trainable: bool = True
@@ -38,6 +40,8 @@ class ModelMetadata:
             "lookback_steps": self.lookback_steps,
             "forecast_horizon": self.forecast_horizon,
             "features": self.features,
+            "requires_physics_features": self.requires_physics_features,
+            "physics_features": self.physics_features,
             "target_representation": self.target_representation,
             "supports_uncertainty": self.supports_uncertainty,
             "trainable": self.trainable,

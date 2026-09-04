@@ -71,6 +71,40 @@ class SatelliteDataReport:
 
 
 @dataclass
+class SamplingMetadata:
+    original_cadence_minutes: Optional[float]  # detected median interval
+    target_cadence_minutes: float              # configured/auto target
+    is_irregular: bool
+    observed_epochs: int
+    interpolated_epochs: int
+    interpolation_fraction: float
+    max_gap_minutes: float
+    cadence_warning: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class SatelliteDataset:
+    satellite_id: str
+    orbit_type: str  # "GEO" | "MEO" | "LEO" | "UNKNOWN"
+    dataframe: pd.DataFrame
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    sampling: Optional[SamplingMetadata] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "satellite_id": self.satellite_id,
+            "orbit_type": self.orbit_type,
+            "row_count": len(self.dataframe),
+            "columns": list(self.dataframe.columns),
+            "metadata": self.metadata,
+            "sampling": self.sampling.to_dict() if self.sampling else None,
+        }
+
+
+@dataclass
 class ValidationResult:
     is_valid: bool
     status: str  # "valid" or "invalid"
@@ -111,12 +145,16 @@ def load_telemetry_source(
     source: Union[str, Path, pd.DataFrame, Dict[str, pd.DataFrame]],
     default_satellite_id: str = "UNKNOWN",
     is_test_dataset: bool = False,
+    satellite_id: Optional[str] = None,
+    orbit_type: Optional[str] = None,
 ) -> Dict[str, pd.DataFrame]:
     """Loads telemetry from a DataFrame, CSV path, or folder of series CSVs.
     
     Returns:
         Dict mapping satellite_id -> DataFrame of telemetry rows.
     """
+    target_sat_id = satellite_id or default_satellite_id
+
     if isinstance(source, dict):
         return {
             sat_id: normalize_dataframe_columns(df.copy())
@@ -125,16 +163,22 @@ def load_telemetry_source(
 
     if isinstance(source, pd.DataFrame):
         df = normalize_dataframe_columns(source.copy())
+        if satellite_id:
+            df["satellite_id"] = satellite_id
+            return {satellite_id: df.sort_values("utc_time").reset_index(drop=True)}
         if "satellite_id" in df.columns:
             return {
                 str(sat_id): sat_df.sort_values("utc_time").reset_index(drop=True)
                 for sat_id, sat_df in df.groupby("satellite_id")
             }
-        return {default_satellite_id: df}
+        return {target_sat_id: df}
 
     path = Path(source)
     if path.is_file():
         df = normalize_dataframe_columns(pd.read_csv(path))
+        if satellite_id:
+            df["satellite_id"] = satellite_id
+            return {satellite_id: df.sort_values("utc_time").reset_index(drop=True)}
         if "satellite_id" in df.columns:
             return {
                 str(sat_id): sat_df.sort_values("utc_time").reset_index(drop=True)
@@ -142,11 +186,16 @@ def load_telemetry_source(
             }
         # Infer satellite from filename if possible (e.g. DATA_GEO_Train.csv -> GEO)
         stem = path.stem.upper()
-        sat_id = default_satellite_id
-        for candidate in ("GEO", "MEO-1", "MEO-2", "MEO2", "MEO1", "MEO"):
-            if candidate in stem:
-                sat_id = candidate.replace("MEO2", "MEO-2").replace("MEO1", "MEO-1")
-                break
+        sat_id = target_sat_id
+        if "GEO" in stem:
+            sat_id = "GEO"
+        elif "MEO" in stem:
+            sat_id = "MEO-2" if ("2" in stem or "MEO2" in stem) else "MEO-1"
+        else:
+            for candidate in ("GEO", "MEO-1", "MEO-2", "MEO2", "MEO1", "MEO"):
+                if candidate in stem:
+                    sat_id = candidate.replace("MEO2", "MEO-2").replace("MEO1", "MEO-1")
+                    break
         return {sat_id: df}
 
     if path.is_dir():
@@ -384,4 +433,196 @@ def validate_dataset(
         errors=errors,
         warnings=warnings,
         normalized_data=normalized_data if is_overall_valid else None,
+    )
+
+
+def infer_orbit_type(satellite_id: str) -> str:
+    """Infers orbit regime ("GEO", "MEO", "LEO", "UNKNOWN") from satellite identifier."""
+    s = str(satellite_id).strip().upper()
+    if "GEO" in s:
+        return "GEO"
+    if "MEO" in s:
+        return "MEO"
+    if "LEO" in s:
+        return "LEO"
+    return "UNKNOWN"
+
+
+def regularize_cadence(
+    df: pd.DataFrame,
+    target_cadence_minutes: Optional[float] = None,
+    max_interpolation_fraction: float = 0.3,
+    resample_if_irregular: bool = False,
+) -> Tuple[pd.DataFrame, SamplingMetadata]:
+    """Inspects and optionally regularizes the temporal cadence of a telemetry DataFrame.
+    
+    Args:
+        df: DataFrame containing 'utc_time' column.
+        target_cadence_minutes: Desired cadence in minutes. If None, uses detected median difference.
+        max_interpolation_fraction: Maximum allowable fraction of interpolated epochs (default 0.3).
+            Raises ValueError if exceeded when resample_if_irregular=True.
+        resample_if_irregular: If True, interpolates onto regular time grid. If False, retains
+            raw observations without artificial interpolation and tags _is_interpolated=False.
+            
+    Returns:
+        Tuple of (DataFrame with '_is_interpolated' column, SamplingMetadata).
+    """
+    if "utc_time" not in df.columns:
+        raise ValueError("DataFrame must contain 'utc_time' column.")
+
+    clean_df = df.copy()
+    clean_df["utc_time"] = pd.to_datetime(clean_df["utc_time"])
+    clean_df = clean_df.dropna(subset=["utc_time"]).sort_values("utc_time").drop_duplicates(subset=["utc_time"])
+
+    n_obs = len(clean_df)
+    if n_obs < 2:
+        meta = SamplingMetadata(
+            original_cadence_minutes=None,
+            target_cadence_minutes=float(target_cadence_minutes) if target_cadence_minutes else 15.0,
+            is_irregular=False,
+            observed_epochs=n_obs,
+            interpolated_epochs=0,
+            interpolation_fraction=0.0,
+            max_gap_minutes=0.0,
+            cadence_warning="Insufficient epochs (< 2) to evaluate cadence.",
+        )
+        clean_df["_is_interpolated"] = False
+        return clean_df.reset_index(drop=True), meta
+
+    diffs = clean_df["utc_time"].diff().dropna()
+    median_td = diffs.median()
+    median_minutes = float(median_td.total_seconds() / 60.0)
+    max_gap_minutes = float(diffs.max().total_seconds() / 60.0)
+
+    target_cadence = float(target_cadence_minutes) if target_cadence_minutes is not None else median_minutes
+    target_td = pd.Timedelta(minutes=target_cadence)
+
+    # Allow a small 5-second jitter tolerance for timestamp recording drift
+    tolerated_irregular = (diffs - target_td).abs() > pd.Timedelta(seconds=5)
+    is_irregular = bool(tolerated_irregular.any())
+
+    cadence_warning = None
+    if is_irregular:
+        cadence_warning = (
+            f"Observed cadence varies from target {target_cadence:.1f}m "
+            f"(median={median_minutes:.1f}m, max_gap={max_gap_minutes:.1f}m)."
+        )
+
+    if not resample_if_irregular or not is_irregular:
+        clean_df["_is_interpolated"] = False
+        meta = SamplingMetadata(
+            original_cadence_minutes=median_minutes,
+            target_cadence_minutes=target_cadence,
+            is_irregular=is_irregular,
+            observed_epochs=n_obs,
+            interpolated_epochs=0,
+            interpolation_fraction=0.0,
+            max_gap_minutes=max_gap_minutes,
+            cadence_warning=cadence_warning,
+        )
+        return clean_df.reset_index(drop=True), meta
+
+    # Resample onto a regular grid
+    start_time = clean_df["utc_time"].min()
+    end_time = clean_df["utc_time"].max()
+    grid = pd.date_range(start=start_time, end=end_time, freq=target_td)
+
+    indexed_df = clean_df.set_index("utc_time")
+    numeric_cols = list(indexed_df.select_dtypes(include=[np.number]).columns)
+    non_numeric_cols = [c for c in indexed_df.columns if c not in numeric_cols]
+
+    reindexed = indexed_df.reindex(indexed_df.index.union(grid))
+    if numeric_cols:
+        reindexed[numeric_cols] = reindexed[numeric_cols].interpolate(method="time")
+    for col in non_numeric_cols:
+        reindexed[col] = reindexed[col].ffill().bfill()
+
+    final_df = reindexed.loc[grid].copy().reset_index().rename(columns={"index": "utc_time"})
+
+    total_epochs = len(final_df)
+    existing_set = set(clean_df["utc_time"])
+    final_df["_is_interpolated"] = ~final_df["utc_time"].isin(existing_set)
+    interpolated_epochs = int(final_df["_is_interpolated"].sum())
+    interp_fraction = float(interpolated_epochs / max(1, total_epochs))
+
+    if interp_fraction > max_interpolation_fraction:
+        msg = f"Interpolation fraction {interp_fraction:.1%} exceeds maximum allowable {max_interpolation_fraction:.1%}."
+        cadence_warning = f"{cadence_warning} {msg}" if cadence_warning else msg
+        raise ValueError(msg)
+
+    meta = SamplingMetadata(
+        original_cadence_minutes=median_minutes,
+        target_cadence_minutes=target_cadence,
+        is_irregular=True,
+        observed_epochs=n_obs,
+        interpolated_epochs=interpolated_epochs,
+        interpolation_fraction=interp_fraction,
+        max_gap_minutes=max_gap_minutes,
+        cadence_warning=cadence_warning,
+    )
+    return final_df.reset_index(drop=True), meta
+
+
+def validate_satellite_dataset(
+    source: Union[str, Path, pd.DataFrame],
+    satellite_id: Optional[str] = None,
+    orbit_type: Optional[str] = None,
+    target_cadence_minutes: Optional[float] = None,
+    min_history_rows: int = 8,
+    resample_if_irregular: bool = False,
+    max_interpolation_fraction: float = 0.3,
+) -> SatelliteDataset:
+    """Validates and packages a single satellite upload into a validated SatelliteDataset.
+    
+    Accepts CSVs with or without a 'satellite_id' column.
+    
+    Args:
+        source: File path, string path, or pandas DataFrame.
+        satellite_id: Explicit satellite ID (e.g. 'GEO', 'MEO-1'). If omitted, inferred from source.
+        orbit_type: 'GEO', 'MEO', 'LEO', etc. If omitted, inferred from satellite ID.
+        target_cadence_minutes: Optional target cadence in minutes.
+        min_history_rows: Minimum required epochs (default 8).
+        resample_if_irregular: Whether to linearly interpolate irregular epochs.
+        max_interpolation_fraction: Max allowed interpolated fraction (default 0.3).
+        
+    Returns:
+        SatelliteDataset containing normalized DataFrame and SamplingMetadata.
+        
+    Raises:
+        ValueError: If validation fails or data does not meet schema requirements.
+    """
+    raw_dict = load_telemetry_source(source, satellite_id=satellite_id, orbit_type=orbit_type)
+    if not raw_dict:
+        raise ValueError(f"No telemetry data could be loaded from {source}")
+
+    chosen_id = satellite_id or next(iter(raw_dict.keys()))
+    df = raw_dict[chosen_id]
+
+    val_res = validate_dataset(df, min_history_rows=min_history_rows)
+    if not val_res.is_valid:
+        err_msgs = [e.reason for e in val_res.errors]
+        raise ValueError(f"Dataset validation failed for {chosen_id}: {'; '.join(err_msgs)}")
+
+    validated_df = val_res.normalized_data.get(chosen_id, next(iter(val_res.normalized_data.values())))
+
+    reg_df, sampling_meta = regularize_cadence(
+        validated_df,
+        target_cadence_minutes=target_cadence_minutes,
+        max_interpolation_fraction=max_interpolation_fraction,
+        resample_if_irregular=resample_if_irregular,
+    )
+
+    resolved_orbit_type = (orbit_type or infer_orbit_type(chosen_id)).upper()
+    reg_df["satellite_id"] = chosen_id
+
+    return SatelliteDataset(
+        satellite_id=chosen_id,
+        orbit_type=resolved_orbit_type,
+        dataframe=reg_df,
+        metadata={
+            "source": str(source) if isinstance(source, (str, Path)) else "in_memory_dataframe",
+            "start_time": reg_df["utc_time"].min().isoformat() if len(reg_df) else None,
+            "end_time": reg_df["utc_time"].max().isoformat() if len(reg_df) else None,
+        },
+        sampling=sampling_meta,
     )

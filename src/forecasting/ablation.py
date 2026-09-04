@@ -93,36 +93,27 @@ def run_ablation_experiment(
             })
 
         # -------------------------------------------------------------
-        # E1: + RIC Coordinate Transformation
+        # E1: + RIC Coordinate Feature Integration
         # -------------------------------------------------------------
-        # Rotate ECEF errors to RIC, fit Harmonic Ridge, predict in RIC, rotate back to ECEF
         t0 = time.perf_counter()
-        pos_train, vel_train = nominal_satellite_orbit(train_df["utc_time"], orbit_class=sat_id, satellite_id=sat_id)
-        ric_train_err = ecef_error_to_ric(train_df[TARGET_COLS[:3]].to_numpy(dtype=float), pos_train, vel_train)
-
-        ric_train_df = train_df.copy()
-        ric_train_df["x_error_m"] = ric_train_err[:, 0]
-        ric_train_df["y_error_m"] = ric_train_err[:, 1]
-        ric_train_df["z_error_m"] = ric_train_err[:, 2]
-
-        inst_ric = HarmonicRidgeModel(name="Harmonic Ridge (RIC)")
-        inst_ric.fit(ric_train_df)
-        pred_ric = inst_ric.predict(ric_train_df, test_times)
-
-        pos_test, vel_test = nominal_satellite_orbit(test_times, orbit_class=sat_id, satellite_id=sat_id)
-        pred_ecef_xyz = ric_error_to_ecef(pred_ric[:, :3], pos_test, vel_test)
-        pred_e1 = np.empty_like(pred_ric)
-        pred_e1[:, :3] = pred_ecef_xyz
-        pred_e1[:, 3] = pred_ric[:, 3]
+        inst_ric = RandomForestModel(
+            name="Random Forest + RIC",
+            use_ric=True,
+            satellite_id=sat_id,
+            orbit_class=sat_id,
+            random_state=42,
+        )
+        inst_ric.fit(train_df)
+        pred_e1 = inst_ric.predict(train_df, test_times)
         dur = time.perf_counter() - t0
 
         m_e1 = compute_metrics_for_residuals(test_actual, pred_e1, orbit_class=sat_id, timestamps=test_times)
         records.append({
-            "experiment_id": "E1_ric_frame",
+            "experiment_id": "E1_ric_features",
             "satellite": sat_id,
-            "model": "Harmonic Ridge (RIC)",
-            "feature_frame": "RIC",
-            "configuration": "ecef_to_ric_training_and_reconstruction",
+            "model": "Random Forest + RIC",
+            "feature_frame": "ECEF + RIC",
+            "configuration": "ric_radial_in_track_cross_track_features",
             "orbit_3d_mae_m": m_e1["orbit_3d_vector_mae_m"],
             "clock_mae_m": m_e1["clock_mae_m"],
             "sisre_mean_m": m_e1["sisre_mean_m"],
@@ -193,15 +184,16 @@ def run_ablation_experiment(
         })
 
         # -------------------------------------------------------------
-        # E5: + SRP Features (Sun beta angle & shadow factor)
+        # E5: + SRP Features (Sun beta angle, shadow factor, solar cos angle)
         # -------------------------------------------------------------
         t0 = time.perf_counter()
-        pos_srp, vel_srp = nominal_satellite_orbit(train_df["utc_time"], orbit_class=sat_id, satellite_id=sat_id)
-        beta_ang = compute_sun_beta_angle(pos_srp, vel_srp, train_df["utc_time"])
-        shadow = compute_shadow_factor(pos_srp, train_df["utc_time"])
-
-        # Train Random Forest augmented with SRP features
-        inst_srp = RandomForestModel(name="Random Forest + SRP")
+        inst_srp = RandomForestModel(
+            name="Random Forest + SRP",
+            enable_srp=True,
+            satellite_id=sat_id,
+            orbit_class=sat_id,
+            random_state=42,
+        )
         inst_srp.fit(train_df)
         pred_e5 = inst_srp.predict(train_df, test_times)
         dur = time.perf_counter() - t0
@@ -212,7 +204,7 @@ def run_ablation_experiment(
             "satellite": sat_id,
             "model": "Random Forest + SRP",
             "feature_frame": "ECEF + SRP",
-            "configuration": "sun_beta_angle_and_shadow_factor",
+            "configuration": "sun_beta_angle_shadow_factor_solar_cos_angle",
             "orbit_3d_mae_m": m_e5["orbit_3d_vector_mae_m"],
             "clock_mae_m": m_e5["clock_mae_m"],
             "sisre_mean_m": m_e5["sisre_mean_m"],

@@ -16,13 +16,23 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 import numpy as np
 import pandas as pd
 from scipy import stats
+from dataclasses import asdict
 
 from src.forecasting.base import ForecastModel
 from src.forecasting.eligibility import compute_eligibility_matrix
 from src.forecasting.models import MODEL_REGISTRY, create_model, get_available_model_names
-from src.forecasting.registry import SatelliteModelRegistry, SatelliteSelection
+from src.forecasting.registry import (
+    SatelliteModelRegistry,
+    SatelliteSelection,
+    get_satellite_artifact_dir,
+)
 from src.forecasting.router import PredictionRouter
-from src.forecasting.validation import load_telemetry_source, validate_dataset
+from src.forecasting.validation import (
+    SatelliteDataset,
+    load_telemetry_source,
+    normalize_dataframe_columns,
+    validate_dataset,
+)
 from src.physics import compute_sisre, ecef_error_to_ric, nominal_satellite_orbit
 
 logger = logging.getLogger(__name__)
@@ -339,6 +349,7 @@ class CalibrationPipeline:
             "persistence",
             "harmonic_ridge",
             "random_forest",
+            "random_forest_srp",
             "gaussian_process",
             "geo_moe",
             "bilstm_gru",
@@ -570,12 +581,33 @@ class CalibrationPipeline:
             artifact_dest = self.artifacts_dir / artifact_filename
             winner_model.save(artifact_dest)
 
+            # Also persist into nested satellite artifact layout
+            sat_artifact_dir = get_satellite_artifact_dir(sat_id, self.artifacts_dir)
+            ext = ".pt" if "moe" in winner_name or "nhits" in winner_name or "bilstm" in winner_name or "transformer" in winner_name else ".joblib"
+            nested_dest = sat_artifact_dir / f"model{ext}"
+            winner_model.save(nested_dest)
+
             # 6. Update Persistent Satellite Model Registry
             winning_score = float(winner_eval["priority_1"]["W"]["average"])
             candidate_w_scores = {
                 m: float(candidate_evaluations[m]["priority_1"]["W"]["average"])
                 for m in candidate_evaluations
             }
+
+            winner_meta = winner_model.get_metadata()
+            winner_phys_features = getattr(winner_meta, "physics_features", [])
+            feature_manifest = getattr(winner_model, "feature_manifest", None)
+            feat_dict = feature_manifest.to_dict() if feature_manifest else {"features": getattr(winner_meta, "features", [])}
+
+            (sat_artifact_dir / "metadata.json").write_text(
+                json.dumps(asdict(winner_meta), indent=2, default=str), encoding="utf-8"
+            )
+            (sat_artifact_dir / "feature_manifest.json").write_text(
+                json.dumps(feat_dict, indent=2, default=str), encoding="utf-8"
+            )
+            (sat_artifact_dir / "evaluation.json").write_text(
+                json.dumps(winner_eval, indent=2, default=str), encoding="utf-8"
+            )
 
             selection = self.registry.register_calibration_winner(
                 satellite_id=sat_id,
@@ -602,6 +634,13 @@ class CalibrationPipeline:
                     for m in candidate_evaluations
                 },
                 supplementary_diagnostics=winner_eval["supplementary"],
+                physics_features=winner_phys_features,
+                orbit_state_source="nominal_approximation",
+                orbit_type="GEO" if "GEO" in sat_id.upper() else "MEO",
+                use_ric=bool(getattr(winner_model, "use_ric", False)),
+                use_srp=bool(getattr(winner_model, "enable_srp", False) or getattr(winner_model, "use_srp", False)),
+                cadence_minutes=15.0,
+                feature_manifest=feat_dict,
             )
 
             calibration_summary["satellite_winners"][sat_id] = {
@@ -617,6 +656,8 @@ class CalibrationPipeline:
                     "aggregate_max_discrepancy": winner_eval["priority_3"]["aggregate_max_discrepancy"],
                 },
                 "supplementary_diagnostics": winner_eval["supplementary"],
+                "physics_features": winner_phys_features,
+                "orbit_state_source": "nominal_approximation",
                 "candidate_scores": candidate_w_scores,
                 "artifact": str(artifact_dest),
             }
@@ -658,4 +699,193 @@ class CalibrationPipeline:
         calibration_summary["status"] = "success"
         calibration_summary["report_dir"] = str(report_dir)
         return calibration_summary
+
+    def train_single_satellite(
+        self,
+        dataset: SatelliteDataset,
+        test_data: Union[pd.DataFrame, SatelliteDataset],
+        use_ric: bool = False,
+        use_srp: bool = False,
+        target_cadence_minutes: Optional[float] = None,
+        candidate_models: Optional[List[str]] = None,
+        run_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Calibrates and registers models for a single uploaded satellite dataset.
+
+        Evaluates candidate models strictly on test observations using the Official
+        Competition Evaluation Hierarchy. Persists model artifacts to
+        models/registry/artifacts/satellites/<sat_id>/ and atomically updates the registry.
+        """
+        sat_id = dataset.satellite_id
+        orbit_type = dataset.orbit_type
+        sat_train = dataset.dataframe.copy()
+
+        if isinstance(test_data, SatelliteDataset):
+            sat_test = test_data.dataframe.copy()
+        elif isinstance(test_data, (str, Path)):
+            sat_test = normalize_dataframe_columns(pd.read_csv(test_data))
+        else:
+            sat_test = normalize_dataframe_columns(test_data.copy())
+
+        test_times = pd.to_datetime(sat_test["utc_time"]).reset_index(drop=True)
+        test_actuals = sat_test[TARGET_COLS].to_numpy(dtype=np.float64)
+
+        cadence = (
+            target_cadence_minutes
+            or (dataset.sampling.target_cadence_minutes if dataset.sampling else None)
+            or 15.0
+        )
+
+        train_bytes = sat_train[TARGET_COLS].to_numpy().tobytes()
+        train_hash = hashlib.sha256(train_bytes).hexdigest()[:16]
+
+        candidate_evaluations: Dict[str, Dict[str, Any]] = {}
+        trained_models: Dict[str, ForecastModel] = {}
+        models_to_eval = list(candidate_models) if candidate_models else list(self.candidate_models)
+
+        for model_name in models_to_eval:
+            try:
+                kwargs: Dict[str, Any] = {
+                    "orbit_class": orbit_type,
+                    "satellite_id": sat_id,
+                    "cadence_minutes": cadence,
+                }
+                if "random_forest" in model_name:
+                    kwargs["use_ric"] = use_ric or ("ric" in model_name)
+                    kwargs["enable_srp"] = use_srp or ("srp" in model_name)
+                elif "harmonic_ridge" in model_name:
+                    kwargs["use_ric"] = use_ric or ("ric" in model_name)
+                    kwargs["use_srp"] = use_srp or ("srp" in model_name)
+
+                model_inst = create_model(model_name, **kwargs)
+                model_inst.fit(sat_train)
+
+                preds = model_inst.predict(sat_train, test_times)
+
+                eval_res = evaluate_residuals_official_hierarchy(
+                    actual=test_actuals,
+                    predicted=preds,
+                    orbit_class=orbit_type,
+                    timestamps=test_times,
+                    alpha=self.alpha,
+                )
+
+                if not eval_res.get("eligible", True):
+                    continue
+
+                candidate_evaluations[model_name] = eval_res
+                trained_models[model_name] = model_inst
+            except Exception as exc:
+                logger.warning(f"Evaluation failed for candidate {model_name} on {sat_id}: {exc}")
+                continue
+
+        if not candidate_evaluations:
+            raise ValueError(f"No candidate model succeeded calibration for satellite '{sat_id}'")
+
+        def candidate_sort_key(m_name: str) -> Any:
+            m_info = candidate_evaluations[m_name]
+            w_score = -float(m_info["priority_1"]["W"]["average"])
+            mean_score = float(m_info["priority_2"]["mean"]["aggregate"])
+            std_score = float(m_info["priority_2"]["std"]["aggregate"])
+            outlier_score = int(m_info["priority_3"]["total_outliers"])
+            disc_score = float(m_info["priority_3"]["aggregate_max_discrepancy"])
+            return (w_score, mean_score, std_score, outlier_score, disc_score)
+
+        sorted_candidates = sorted(candidate_evaluations.keys(), key=candidate_sort_key)
+        winner_name = sorted_candidates[0]
+        winner_eval = candidate_evaluations[winner_name]
+        winner_model = trained_models[winner_name]
+
+        if len(sorted_candidates) > 1:
+            runner_up = sorted_candidates[1]
+            _, reason = compare_models_hierarchical(
+                winner_eval,
+                candidate_evaluations[runner_up],
+                tie_tolerance=self.tie_tolerance,
+            )
+            selection_reason = f"{winner_name} won vs {runner_up}: {reason}"
+        else:
+            selection_reason = f"Only eligible model: {winner_name}"
+
+        # Per-satellite dedicated artifact directory
+        sat_artifact_dir = get_satellite_artifact_dir(sat_id, self.artifacts_dir)
+        is_torch = any(k in winner_name for k in ("moe", "nhits", "bilstm", "transformer"))
+        ext = ".pt" if is_torch else ".joblib"
+        dedicated_artifact = sat_artifact_dir / f"model{ext}"
+        flat_artifact = self.artifacts_dir / f"{sat_id}_{winner_name}{ext}"
+
+        winner_model.save(dedicated_artifact)
+        winner_model.save(flat_artifact)
+
+        winner_meta = winner_model.get_metadata()
+        winner_phys_features = getattr(winner_meta, "physics_features", [])
+        feature_manifest = getattr(winner_model, "feature_manifest", None)
+        feat_dict = feature_manifest.to_dict() if feature_manifest else {"features": getattr(winner_meta, "features", [])}
+
+        (sat_artifact_dir / "metadata.json").write_text(
+            json.dumps(asdict(winner_meta), indent=2, default=str), encoding="utf-8"
+        )
+        (sat_artifact_dir / "feature_manifest.json").write_text(
+            json.dumps(feat_dict, indent=2, default=str), encoding="utf-8"
+        )
+        (sat_artifact_dir / "evaluation.json").write_text(
+            json.dumps(winner_eval, indent=2, default=str), encoding="utf-8"
+        )
+
+        winning_score = float(winner_eval["priority_1"]["W"]["average"])
+        candidate_w_scores = {
+            m: float(candidate_evaluations[m]["priority_1"]["W"]["average"])
+            for m in candidate_evaluations
+        }
+
+        selection = self.registry.register_calibration_winner(
+            satellite_id=sat_id,
+            winner_model=winner_name,
+            score=winning_score,
+            candidate_scores=candidate_w_scores,
+            training_dataset_hash=train_hash,
+            model_artifact=str(dedicated_artifact),
+            primary_metric="shapiro_w_avg",
+            selection_policy=self.selection_policy,
+            winning_priority_1=winner_eval["priority_1"],
+            winning_priority_2=winner_eval["priority_2"],
+            winning_priority_3=winner_eval["priority_3"],
+            candidate_results={
+                m: {
+                    "priority_1": candidate_evaluations[m]["priority_1"],
+                    "priority_2": candidate_evaluations[m]["priority_2"],
+                    "priority_3": {
+                        "total_outliers": candidate_evaluations[m]["priority_3"]["total_outliers"],
+                        "aggregate_max_discrepancy": candidate_evaluations[m]["priority_3"]["aggregate_max_discrepancy"],
+                    },
+                    "supplementary": candidate_evaluations[m]["supplementary"],
+                }
+                for m in candidate_evaluations
+            },
+            supplementary_diagnostics=winner_eval["supplementary"],
+            physics_features=winner_phys_features,
+            orbit_state_source="nominal_approximation",
+            orbit_type=orbit_type,
+            use_ric=use_ric or ("ric" in winner_name),
+            use_srp=use_srp or ("srp" in winner_name),
+            cadence_minutes=cadence,
+            feature_manifest=feat_dict,
+        )
+
+        return {
+            "satellite_id": sat_id,
+            "orbit_type": orbit_type,
+            "selected_model": selection.selected_model,
+            "selection_mode": selection.selection_mode,
+            "selection_reason": selection_reason,
+            "winning_score": winning_score,
+            "priority_1": winner_eval["priority_1"],
+            "priority_2": winner_eval["priority_2"],
+            "priority_3": winner_eval["priority_3"],
+            "supplementary": winner_eval["supplementary"],
+            "candidate_scores": candidate_w_scores,
+            "model_artifact": str(dedicated_artifact),
+            "flat_artifact": str(flat_artifact),
+            "feature_manifest": feat_dict,
+        }
 

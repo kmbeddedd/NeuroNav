@@ -80,13 +80,21 @@ class PredictionRouter:
         # Locate artifact
         candidate_paths = []
         if artifact_path:
-            candidate_paths.append(Path(artifact_path))
-        candidate_paths.extend([
-            self.artifacts_dir / f"{satellite_id}_{model_name}.pt",
-            self.artifacts_dir / f"{satellite_id}_{model_name}.joblib",
-            self.artifacts_dir / f"{model_name}.pt",
-            self.artifacts_dir / f"{model_name}.joblib",
-        ])
+            p = Path(artifact_path)
+            candidate_paths.append(p)
+            if not p.is_absolute():
+                candidate_paths.append(self.artifacts_dir / p)
+        else:
+            candidate_paths.extend([
+                self.artifacts_dir / "satellites" / satellite_id / "model.pt",
+                self.artifacts_dir / "satellites" / satellite_id / "model.joblib",
+                self.artifacts_dir / "satellites" / satellite_id / f"{satellite_id}_{model_name}.pt",
+                self.artifacts_dir / "satellites" / satellite_id / f"{satellite_id}_{model_name}.joblib",
+                self.artifacts_dir / f"{satellite_id}_{model_name}.pt",
+                self.artifacts_dir / f"{satellite_id}_{model_name}.joblib",
+                self.artifacts_dir / f"{model_name}.pt",
+                self.artifacts_dir / f"{model_name}.joblib",
+            ])
 
         target_path = None
         for p in candidate_paths:
@@ -148,8 +156,10 @@ class PredictionRouter:
             if clean_hist.empty:
                 raise RoutingError(f"Satellite '{sat_id}' telemetry has no valid timestamps")
 
+            cadence = getattr(selection, "cadence_minutes", None)
+            eff_cadence = cadence if (cadence is not None and step_interval_minutes == 15) else step_interval_minutes
             last_time = pd.to_datetime(clean_hist["utc_time"].iloc[-1])
-            step_delta = pd.Timedelta(minutes=step_interval_minutes)
+            step_delta = pd.Timedelta(minutes=eff_cadence)
             forecast_times = pd.date_range(start=last_time + step_delta, periods=horizon_steps, freq=step_delta)
 
             # Run model prediction
@@ -177,7 +187,8 @@ class PredictionRouter:
 
             # Optional RIC transformation
             if compute_ric:
-                pos, vel = nominal_satellite_orbit(forecast_times, orbit_class=sat_id, satellite_id=sat_id)
+                orbit_type = getattr(selection, "orbit_type", sat_id)
+                pos, vel = nominal_satellite_orbit(forecast_times, orbit_class=orbit_type, satellite_id=sat_id)
                 error_ecef = np.column_stack([pred_x, pred_y, pred_z])
                 ric_err = ecef_error_to_ric(error_ecef, pos, vel)
                 sat_record["predicted_R"] = ric_err[:, 0]
@@ -188,3 +199,55 @@ class PredictionRouter:
             records.append(df_sat)
 
         return pd.concat(records, ignore_index=True)
+
+    def predict_single_satellite(
+        self,
+        satellite_id: str,
+        history_df: pd.DataFrame,
+        horizon_steps: int = 96,
+        step_interval_minutes: Optional[int] = None,
+        compute_ric: bool = True,
+    ) -> pd.DataFrame:
+        """Executes forecast inference for a single specified satellite."""
+        model, selection = self.get_assigned_model(satellite_id)
+        clean_hist = history_df.dropna(subset=["utc_time"]).sort_values("utc_time")
+        if clean_hist.empty:
+            raise RoutingError(f"Satellite '{satellite_id}' telemetry has no valid timestamps")
+
+        cadence = step_interval_minutes or int(getattr(selection, "cadence_minutes", 15) or 15)
+        last_time = pd.to_datetime(clean_hist["utc_time"].iloc[-1])
+        step_delta = pd.Timedelta(minutes=cadence)
+        forecast_times = pd.date_range(start=last_time + step_delta, periods=horizon_steps, freq=step_delta)
+
+        pred_arr = model.predict(clean_hist, forecast_times)
+
+        pred_x = pred_arr[:, 0]
+        pred_y = pred_arr[:, 1]
+        pred_z = pred_arr[:, 2]
+        pred_clk = pred_arr[:, 3]
+        pred_3d_norm = np.sqrt(pred_x ** 2 + pred_y ** 2 + pred_z ** 2)
+
+        sat_record = {
+            "forecast_step": np.arange(1, horizon_steps + 1),
+            "timestamp": forecast_times,
+            "satellite_id": satellite_id,
+            "predicted_X": pred_x,
+            "predicted_Y": pred_y,
+            "predicted_Z": pred_z,
+            "predicted_Clock": pred_clk,
+            "pred_3D_Orbit_Error": pred_3d_norm,
+            "model_used": selection.selected_model,
+            "model_version": selection.model_version,
+            "selection_mode": selection.selection_mode,
+        }
+
+        if compute_ric:
+            orbit_type = getattr(selection, "orbit_type", satellite_id)
+            pos, vel = nominal_satellite_orbit(forecast_times, orbit_class=orbit_type, satellite_id=satellite_id)
+            error_ecef = np.column_stack([pred_x, pred_y, pred_z])
+            ric_err = ecef_error_to_ric(error_ecef, pos, vel)
+            sat_record["predicted_R"] = ric_err[:, 0]
+            sat_record["predicted_I"] = ric_err[:, 1]
+            sat_record["predicted_C"] = ric_err[:, 2]
+
+        return pd.DataFrame(sat_record)
