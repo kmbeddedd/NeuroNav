@@ -49,10 +49,10 @@ NeuroNav/
 │   ├── train/                         # Training workflows (bilstm, transformer, tune)
 │   ├── evaluate/                      # Evaluation & comparison scripts
 │   ├── benchmark/                     # Official PS-08 competition benchmark runner
-│   └── data/                          # Data acquisition, IGS fetch, and audit scripts
+│   └── data/                          # Supplied-CSV validation and audit scripts
 │
 ├── configs/                           # System contracts & model configurations
-│   ├── data_contract.json             # Ingestion data contract
+│   ├── data_contract.json             # Supplied-CSV data contract
 │   ├── inference_contract.json        # High-level inference contract
 │   ├── bilstm.json                    # BiLSTM hyperparameters
 │   └── transformer.json               # Transformer hyperparameters

@@ -1,7 +1,13 @@
 from pathlib import Path
 import numpy as np
 import pandas as pd
-from scripts.benchmark.benchmark_ps08 import TARGETS, evaluate_predictions, load_series
+from scripts.benchmark.benchmark_ps08 import (
+    SeriesSpec,
+    TARGETS,
+    compose_orbit_class_specialist,
+    evaluate_predictions,
+    load_series,
+)
 
 def test_load_series_normalizes_headers_and_deduplicates(tmp_path: Path):
     path = tmp_path / 'sample.csv'
@@ -22,3 +28,32 @@ def test_ranking_metric_averages_targets_equally():
     target_scores = [report['per_series']['sample']['per_target'][target]['shapiro_w'] for target in TARGETS]
     assert report['average_shapiro_w'] == np.mean(target_scores)
     assert report['rejected_test_count'] in range(5)
+    expected_vector_error = np.linalg.norm(residual[:, None] * np.ones((1, 3)), axis=1).mean()
+    assert np.isclose(report['orbit_vector_mae_m'], expected_vector_error)
+
+
+def test_orbit_class_specialist_routes_targets_by_orbit_class():
+    datasets = {
+        'GEO': {'spec': SeriesSpec('GEO', 'GEO', 'train.csv', 'test.csv')},
+        'MEO-1': {'spec': SeriesSpec('MEO-1', 'MEO', 'train.csv', 'test.csv')},
+    }
+    all_predictions = {
+        'GEO Gated MoE': {'GEO': np.full((2, 4), 1.0)},
+        'Gaussian Process': {'MEO-1': np.full((2, 4), 2.0)},
+        'Random Forest': {'MEO-1': np.full((2, 4), 3.0)},
+    }
+    selections = {
+        'MEO-1': {'orbit_model': 'Gaussian Process', 'clock_model': 'Random Forest'},
+    }
+
+    predictions, routing = compose_orbit_class_specialist(
+        datasets, all_predictions, selections
+    )
+
+    assert np.all(predictions['GEO'] == 1.0)
+    assert np.all(predictions['MEO-1'][:, :3] == 2.0)
+    assert np.all(predictions['MEO-1'][:, 3] == 3.0)
+    assert routing['MEO-1'] == {
+        'orbit_model': 'Gaussian Process',
+        'clock_model': 'Random Forest',
+    }

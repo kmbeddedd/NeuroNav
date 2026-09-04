@@ -46,7 +46,6 @@
     "3D_Orbit_Error": "metre"
   },
   "missing_values": {
-    "sp3_clock_sentinel_seconds": 0.999999999999,
     "max_allowed_consecutive_missing_steps": 0,
     "policy": "History sequence must be temporally contiguous without missing steps"
   },

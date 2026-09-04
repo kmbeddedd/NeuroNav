@@ -6,8 +6,6 @@ import torch
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from src.config import DEFAULT_SEED, FEATURE_COLS_PYTORCH, FORECAST_HORIZON, OUTLIER_THRESHOLD_3D, SEQ_LEN, SPIKE_THRESHOLD, TARGET_COLS_4, TRAIN_END_DATE
 EXPECTED_INTERVAL = pd.Timedelta(minutes=15)
-SP3_CLOCK_SENTINEL_SECONDS = 0.999999999999
-SP3_CLOCK_SENTINEL_ATOL = 1e-09
 VALID_SUFFIX = '_valid'
 PHYSICAL_FEATURE_COLS = ['Broadcast_X', 'Broadcast_Y', 'Broadcast_Z', 'Broadcast_Clock', 'Broadcast_VX', 'Broadcast_VY', 'Broadcast_VZ', 'Broadcast_Clock_Drift', 'Broadcast_Radius', 'Broadcast_Phase_Sin', 'Broadcast_Phase_Cos']
 
@@ -28,37 +26,15 @@ def _validate_target_columns(target_cols: Sequence[str]) -> List[str]:
         raise ValueError(f'Only Error_X, Error_Y, Error_Z, and Error_Clock may be learned targets; unsupported targets: {unsupported}. Derive 3D orbit error from predicted coordinates during evaluation.')
     return columns
 
-def _clock_sentinel_mask(df: pd.DataFrame) -> pd.Series:
-    sentinel = pd.Series(False, index=df.index, dtype=bool)
-    source_found = False
-    for column in ('Modelled_Clock', 'Precise_Clock', 'SP3_Clock'):
-        if column in df.columns:
-            values = pd.to_numeric(df[column], errors='coerce')
-            sentinel |= np.isclose(values, SP3_CLOCK_SENTINEL_SECONDS, rtol=0.0, atol=SP3_CLOCK_SENTINEL_ATOL)
-            source_found = True
-    if not source_found and {'Broadcast_Clock', 'Error_Clock'}.issubset(df.columns):
-        broadcast = pd.to_numeric(df['Broadcast_Clock'], errors='coerce')
-        error = pd.to_numeric(df['Error_Clock'], errors='coerce')
-        sentinel |= np.isclose(broadcast - error, SP3_CLOCK_SENTINEL_SECONDS, rtol=0.0, atol=SP3_CLOCK_SENTINEL_ATOL)
-        source_found = True
-    if not source_found and 'Error_Clock' in df.columns:
-        values = pd.to_numeric(df['Error_Clock'], errors='coerce')
-        sentinel |= np.isclose(np.abs(values), SP3_CLOCK_SENTINEL_SECONDS, rtol=0.0, atol=SP3_CLOCK_SENTINEL_ATOL)
-    return sentinel
-
 def apply_target_validity_contract(df: pd.DataFrame) -> pd.DataFrame:
     result = df.copy()
     missing = [column for column in TARGET_COLS_4 if column not in result.columns]
     if missing:
         raise ValueError(f'Dataset is missing required target columns: {missing}')
-    sentinel = _clock_sentinel_mask(result)
-    result['SP3_Clock_Sentinel'] = sentinel.to_numpy(dtype=bool)
     for column in TARGET_COLS_4:
         numeric = pd.to_numeric(result[column], errors='coerce')
         array = numeric.to_numpy(dtype=np.float64, na_value=np.nan)
         valid = np.isfinite(array)
-        if column == 'Error_Clock':
-            valid &= ~sentinel.to_numpy(dtype=bool)
         result[f'{column}{VALID_SUFFIX}'] = valid
         result[column] = numeric.astype(float)
         result.loc[~valid, column] = np.nan
@@ -124,7 +100,7 @@ def load_and_clean_data(data_path: str, outlier_threshold: float=OUTLIER_THRESHO
     if '3D_Orbit_Error' in df.columns:
         values = pd.to_numeric(df['3D_Orbit_Error'], errors='coerce')
         high_error_rows = int((values >= float(outlier_threshold)).fillna(False).sum())
-    metadata = {'split_time': split_time.isoformat(), 'cadence': report, 'sp3_clock_sentinel_rows': int(df['SP3_Clock_Sentinel'].sum()), 'high_orbit_error_rows_retained': high_error_rows}
+    metadata = {'split_time': split_time.isoformat(), 'cadence': report, 'high_orbit_error_rows_retained': high_error_rows}
     train_df.attrs['data_contract'] = metadata
     test_df.attrs['data_contract'] = metadata
     gps = sum((sat.startswith('G') for sat in complete_sats))
@@ -135,7 +111,6 @@ def load_and_clean_data(data_path: str, outlier_threshold: float=OUTLIER_THRESHO
     print(f'  Train-known satellites: {len(complete_sats)} ({type_str})')
     print(f'  Training records      : {len(train_df):,}')
     print(f'  Testing records       : {len(test_df):,}')
-    print(f"  SP3 clock sentinels   : {metadata['sp3_clock_sentinel_rows']:,} (masked)")
     print(f"  Irregular cadence gaps: {report['irregular_steps']:,} (windows purged)")
     print(f'  Large targets retained: {high_error_rows:,}')
     return (train_df, test_df, complete_sats)
@@ -449,7 +424,6 @@ def prepare_pytorch_datasets(data_path: str, input_window: int=SEQ_LEN, forecast
             return (self.X[index], self.Y[index], self.SAT[index], self.SPIKE[index], self.TARGET_MASK[index])
     df, cadence = _read_data_frame(data_path)
     source_rows = int(len(df))
-    source_sentinel_rows = int(df['SP3_Clock_Sentinel'].sum())
     df = engineer_features(df)
     target_cols = list(TARGET_COLS_4)
     if feature_cols is None:
@@ -568,7 +542,7 @@ def prepare_pytorch_datasets(data_path: str, input_window: int=SEQ_LEN, forecast
     pin_memory = torch.cuda.is_available()
     generator = torch.Generator().manual_seed(int(seed))
     loaders = {'train': DataLoader(datasets['train'], batch_size=batch_size, shuffle=True, pin_memory=pin_memory, generator=generator), 'val': DataLoader(datasets['val'], batch_size=batch_size, shuffle=False, pin_memory=pin_memory), 'test': DataLoader(datasets['test'], batch_size=batch_size, shuffle=False, pin_memory=pin_memory)}
-    data_quality_report = {**cadence, 'source_rows': source_rows, 'sp3_clock_sentinel_rows': source_sentinel_rows, 'rows_retained': int(len(df)), 'rows_excluded_no_training_history': int(source_rows - len(df)), 'skipped_noncontiguous_windows': skipped_gap, 'skipped_all_invalid_target_windows': skipped_all_invalid, 'physical_feature_columns': [column for column in PHYSICAL_FEATURE_COLS if column in selected_feature_cols]}
+    data_quality_report = {**cadence, 'source_rows': source_rows, 'rows_retained': int(len(df)), 'rows_excluded_no_training_history': int(source_rows - len(df)), 'skipped_noncontiguous_windows': skipped_gap, 'skipped_all_invalid_target_windows': skipped_all_invalid, 'physical_feature_columns': [column for column in PHYSICAL_FEATURE_COLS if column in selected_feature_cols]}
     split_metadata = {
         'evaluation_mode': evaluation_mode,
         'interval_minutes': float(expected / pd.Timedelta(minutes=1)),

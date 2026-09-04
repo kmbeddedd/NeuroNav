@@ -1,0 +1,137 @@
+{
+  "schema_version": "1.0",
+  "last_updated": "2026-09-04T02:49:32.195204+00:00",
+  "satellites": {
+    "GEO": {
+      "satellite_id": "GEO",
+      "selected_model": "gaussian_process",
+      "selection_mode": "automatic",
+      "model_version": "1.0.0",
+      "selection_score": 16.432361079122305,
+      "primary_metric": "orbit_3d_vector_mae_m",
+      "training_dataset_hash": "d3c8e0a60f9b11f4",
+      "selected_at": "2026-09-04T02:49:21.707932+00:00",
+      "model_artifact": "models\\registry\\artifacts\\GEO_gaussian_process.joblib",
+      "candidate_scores": {
+        "persistence": 16.926753515294763,
+        "harmonic_ridge": 16.912939708019064,
+        "random_forest": 17.279472459933732,
+        "gaussian_process": 16.432361079122305,
+        "geo_moe": 16.8579846435751,
+        "bilstm_gru": 16.717757699255035,
+        "transformer": 16.90404084011952,
+        "decoupled_clock": 16.912939708019064,
+        "nhits": 24.286537705093778
+      },
+      "feature_config": {},
+      "lookback_config": {},
+      "history": [
+        {
+          "event": "model_replaced",
+          "timestamp": "2026-09-04T02:35:57.762973+00:00",
+          "previous_model": "gaussian_process",
+          "previous_score": 16.432361079122305,
+          "previous_mode": "automatic"
+        },
+        {
+          "event": "model_replaced",
+          "timestamp": "2026-09-04T02:49:21.707932+00:00",
+          "previous_model": "gaussian_process",
+          "previous_score": 16.432361079122305,
+          "previous_mode": "automatic"
+        }
+      ]
+    },
+    "UNKNOWN": {
+      "satellite_id": "UNKNOWN",
+      "selected_model": "gaussian_process",
+      "selection_mode": "automatic",
+      "model_version": "1.0.0",
+      "selection_score": 0.23446090760573826,
+      "primary_metric": "orbit_3d_vector_mae_m",
+      "training_dataset_hash": "23fa50e7f1c4209b",
+      "selected_at": "2026-09-04T02:33:50.833514+00:00",
+      "model_artifact": "models\\registry\\artifacts\\UNKNOWN_gaussian_process.joblib",
+      "candidate_scores": {
+        "persistence": 0.3193295248052877,
+        "harmonic_ridge": 0.27385697686381794,
+        "random_forest": 0.3265961917598889,
+        "gaussian_process": 0.23446090760573826,
+        "geo_moe": 0.2646468565307054,
+        "bilstm_gru": 0.2624014498466411,
+        "transformer": 0.2895932727292276,
+        "decoupled_clock": 0.27385697686381794,
+        "nhits": 0.34922996677022544
+      },
+      "feature_config": {},
+      "lookback_config": {},
+      "history": []
+    },
+    "MEO-1": {
+      "satellite_id": "MEO-1",
+      "selected_model": "gaussian_process",
+      "selection_mode": "automatic",
+      "model_version": "1.0.0",
+      "selection_score": 0.3098798787681022,
+      "primary_metric": "orbit_3d_vector_mae_m",
+      "training_dataset_hash": "946d5333ee1d0a13",
+      "selected_at": "2026-09-04T02:49:25.934651+00:00",
+      "model_artifact": "models\\registry\\artifacts\\MEO-1_gaussian_process.joblib",
+      "candidate_scores": {
+        "persistence": 0.8566226649299479,
+        "harmonic_ridge": 0.8837691373765542,
+        "random_forest": 0.5662743941923535,
+        "gaussian_process": 0.3098798787681022,
+        "geo_moe": 0.9383232086475283,
+        "bilstm_gru": 0.6298194734566821,
+        "transformer": 0.7879812917676077,
+        "decoupled_clock": 0.8837691373765542,
+        "nhits": 1.032113959375292
+      },
+      "feature_config": {},
+      "lookback_config": {},
+      "history": [
+        {
+          "event": "model_replaced",
+          "timestamp": "2026-09-04T02:49:25.934651+00:00",
+          "previous_model": "gaussian_process",
+          "previous_score": 0.3098798787681022,
+          "previous_mode": "automatic"
+        }
+      ]
+    },
+    "MEO-2": {
+      "satellite_id": "MEO-2",
+      "selected_model": "gaussian_process",
+      "selection_mode": "automatic",
+      "model_version": "1.0.0",
+      "selection_score": 0.23446090760573826,
+      "primary_metric": "orbit_3d_vector_mae_m",
+      "training_dataset_hash": "23fa50e7f1c4209b",
+      "selected_at": "2026-09-04T02:49:32.195015+00:00",
+      "model_artifact": "models\\registry\\artifacts\\MEO-2_gaussian_process.joblib",
+      "candidate_scores": {
+        "persistence": 0.3193295248052877,
+        "harmonic_ridge": 0.27385697686381794,
+        "random_forest": 0.3265961917598889,
+        "gaussian_process": 0.23446090760573826,
+        "geo_moe": 0.28123785498733866,
+        "bilstm_gru": 0.27446981425360595,
+        "transformer": 0.2817763966288964,
+        "decoupled_clock": 0.27385697686381794,
+        "nhits": 0.3659701331852785
+      },
+      "feature_config": {},
+      "lookback_config": {},
+      "history": [
+        {
+          "event": "model_replaced",
+          "timestamp": "2026-09-04T02:49:32.195015+00:00",
+          "previous_model": "gaussian_process",
+          "previous_score": 0.23446090760573826,
+          "previous_mode": "automatic"
+        }
+      ]
+    }
+  }
+}

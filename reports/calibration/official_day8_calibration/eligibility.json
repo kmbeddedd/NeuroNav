@@ -1,0 +1,224 @@
+{
+  "GEO": {
+    "persistence": {
+      "satellite": "GEO",
+      "model": "persistence",
+      "eligible": true,
+      "reason": null,
+      "min_required_rows": 4,
+      "available_rows": 142
+    },
+    "harmonic_ridge": {
+      "satellite": "GEO",
+      "model": "harmonic_ridge",
+      "eligible": true,
+      "reason": null,
+      "min_required_rows": 12,
+      "available_rows": 142
+    },
+    "random_forest": {
+      "satellite": "GEO",
+      "model": "random_forest",
+      "eligible": true,
+      "reason": null,
+      "min_required_rows": 12,
+      "available_rows": 142
+    },
+    "gaussian_process": {
+      "satellite": "GEO",
+      "model": "gaussian_process",
+      "eligible": true,
+      "reason": null,
+      "min_required_rows": 8,
+      "available_rows": 142
+    },
+    "geo_moe": {
+      "satellite": "GEO",
+      "model": "geo_moe",
+      "eligible": true,
+      "reason": null,
+      "min_required_rows": 16,
+      "available_rows": 142
+    },
+    "bilstm_gru": {
+      "satellite": "GEO",
+      "model": "bilstm_gru",
+      "eligible": true,
+      "reason": null,
+      "min_required_rows": 16,
+      "available_rows": 142
+    },
+    "transformer": {
+      "satellite": "GEO",
+      "model": "transformer",
+      "eligible": true,
+      "reason": null,
+      "min_required_rows": 16,
+      "available_rows": 142
+    },
+    "decoupled_clock": {
+      "satellite": "GEO",
+      "model": "decoupled_clock",
+      "eligible": true,
+      "reason": null,
+      "min_required_rows": 12,
+      "available_rows": 142
+    },
+    "nhits": {
+      "satellite": "GEO",
+      "model": "nhits",
+      "eligible": true,
+      "reason": null,
+      "min_required_rows": 24,
+      "available_rows": 142
+    }
+  },
+  "MEO-1": {
+    "persistence": {
+      "satellite": "MEO-1",
+      "model": "persistence",
+      "eligible": true,
+      "reason": null,
+      "min_required_rows": 4,
+      "available_rows": 46
+    },
+    "harmonic_ridge": {
+      "satellite": "MEO-1",
+      "model": "harmonic_ridge",
+      "eligible": true,
+      "reason": null,
+      "min_required_rows": 12,
+      "available_rows": 46
+    },
+    "random_forest": {
+      "satellite": "MEO-1",
+      "model": "random_forest",
+      "eligible": true,
+      "reason": null,
+      "min_required_rows": 12,
+      "available_rows": 46
+    },
+    "gaussian_process": {
+      "satellite": "MEO-1",
+      "model": "gaussian_process",
+      "eligible": true,
+      "reason": null,
+      "min_required_rows": 8,
+      "available_rows": 46
+    },
+    "geo_moe": {
+      "satellite": "MEO-1",
+      "model": "geo_moe",
+      "eligible": true,
+      "reason": null,
+      "min_required_rows": 16,
+      "available_rows": 46
+    },
+    "bilstm_gru": {
+      "satellite": "MEO-1",
+      "model": "bilstm_gru",
+      "eligible": true,
+      "reason": null,
+      "min_required_rows": 16,
+      "available_rows": 46
+    },
+    "transformer": {
+      "satellite": "MEO-1",
+      "model": "transformer",
+      "eligible": true,
+      "reason": null,
+      "min_required_rows": 16,
+      "available_rows": 46
+    },
+    "decoupled_clock": {
+      "satellite": "MEO-1",
+      "model": "decoupled_clock",
+      "eligible": true,
+      "reason": null,
+      "min_required_rows": 12,
+      "available_rows": 46
+    },
+    "nhits": {
+      "satellite": "MEO-1",
+      "model": "nhits",
+      "eligible": true,
+      "reason": null,
+      "min_required_rows": 24,
+      "available_rows": 46
+    }
+  },
+  "MEO-2": {
+    "persistence": {
+      "satellite": "MEO-2",
+      "model": "persistence",
+      "eligible": true,
+      "reason": null,
+      "min_required_rows": 4,
+      "available_rows": 143
+    },
+    "harmonic_ridge": {
+      "satellite": "MEO-2",
+      "model": "harmonic_ridge",
+      "eligible": true,
+      "reason": null,
+      "min_required_rows": 12,
+      "available_rows": 143
+    },
+    "random_forest": {
+      "satellite": "MEO-2",
+      "model": "random_forest",
+      "eligible": true,
+      "reason": null,
+      "min_required_rows": 12,
+      "available_rows": 143
+    },
+    "gaussian_process": {
+      "satellite": "MEO-2",
+      "model": "gaussian_process",
+      "eligible": true,
+      "reason": null,
+      "min_required_rows": 8,
+      "available_rows": 143
+    },
+    "geo_moe": {
+      "satellite": "MEO-2",
+      "model": "geo_moe",
+      "eligible": true,
+      "reason": null,
+      "min_required_rows": 16,
+      "available_rows": 143
+    },
+    "bilstm_gru": {
+      "satellite": "MEO-2",
+      "model": "bilstm_gru",
+      "eligible": true,
+      "reason": null,
+      "min_required_rows": 16,
+      "available_rows": 143
+    },
+    "transformer": {
+      "satellite": "MEO-2",
+      "model": "transformer",
+      "eligible": true,
+      "reason": null,
+      "min_required_rows": 16,
+      "available_rows": 143
+    },
+    "decoupled_clock": {
+      "satellite": "MEO-2",
+      "model": "decoupled_clock",
+      "eligible": true,
+      "reason": null,
+      "min_required_rows": 12,
+      "available_rows": 143
+    },
+    "nhits": {
+      "satellite": "MEO-2",
+      "model": "nhits",
+      "eligible": true,
+      "reason": null,
+      "min_required_rows": 24,
+      "available_rows": 143
+    }
+  }
+}

@@ -144,6 +144,98 @@ def predict_gaussian_process(datasets: dict[str, dict[str, Any]], output_dir: Pa
         dump(fitted_models, output_dir / 'gaussian_process_day8.joblib')
     return predictions
 
+
+def select_meo_specialists(
+    datasets: dict[str, dict[str, Any]],
+    validation_days: int = 3,
+) -> dict[str, dict[str, Any]]:
+    """Select MEO orbit and clock experts using training-only rolling origins."""
+    candidates: dict[str, Callable[..., dict[str, np.ndarray]]] = {
+        'Persistence': predict_persistence,
+        'Harmonic Ridge': predict_harmonic_ridge,
+        'Random Forest': predict_random_forest,
+        'Gaussian Process': predict_gaussian_process,
+    }
+    selections: dict[str, dict[str, Any]] = {}
+    for series_name, item in datasets.items():
+        if item['spec'].orbit_class != 'MEO':
+            continue
+        frame = item['train']
+        days = sorted(pd.DatetimeIndex(frame['utc_time'].dt.floor('D').unique()))
+        score_parts = {
+            model_name: {'orbit_errors': [], 'clock_errors': []}
+            for model_name in candidates
+        }
+        folds = []
+        for validation_day in days[-validation_days:]:
+            train = frame[frame['utc_time'] < validation_day].reset_index(drop=True)
+            validation = frame[frame['utc_time'].dt.floor('D') == validation_day].reset_index(drop=True)
+            if len(train) < 12 or validation.empty:
+                continue
+            fold_item = {**item, 'train': train, 'test': validation}
+            fold = {series_name: fold_item}
+            actual = validation[list(TARGETS)].to_numpy(dtype=float)
+            folds.append({
+                'validation_day': validation_day.isoformat(),
+                'training_rows': len(train),
+                'validation_rows': len(validation),
+            })
+            for model_name, predictor in candidates.items():
+                predicted = predictor(fold)[series_name]
+                residual = predicted - actual
+                score_parts[model_name]['orbit_errors'].extend(
+                    np.linalg.norm(residual[:, :3], axis=1).tolist()
+                )
+                score_parts[model_name]['clock_errors'].extend(
+                    np.abs(residual[:, 3]).tolist()
+                )
+        if not folds:
+            raise ValueError(f'{series_name}: no training-only MEO validation folds were available')
+        scores = {
+            model_name: {
+                'validation_rows': len(values['orbit_errors']),
+                'orbit_vector_mae_m': float(np.mean(values['orbit_errors'])),
+                'clock_mae_m': float(np.mean(values['clock_errors'])),
+            }
+            for model_name, values in score_parts.items()
+        }
+        selections[series_name] = {
+            'orbit_model': min(scores, key=lambda name: scores[name]['orbit_vector_mae_m']),
+            'clock_model': min(scores, key=lambda name: scores[name]['clock_mae_m']),
+            'folds': folds,
+            'scores': scores,
+        }
+    return selections
+
+
+def compose_orbit_class_specialist(
+    datasets: dict[str, dict[str, Any]],
+    all_predictions: dict[str, dict[str, np.ndarray]],
+    meo_selections: dict[str, dict[str, Any]],
+) -> tuple[dict[str, np.ndarray], dict[str, dict[str, str]]]:
+    """Route GEO to its gated expert and MEO targets to validated specialists."""
+    predictions: dict[str, np.ndarray] = {}
+    routing: dict[str, dict[str, str]] = {}
+    for series_name, item in datasets.items():
+        if item['spec'].orbit_class == 'GEO':
+            predictions[series_name] = all_predictions['GEO Gated MoE'][series_name].copy()
+            routing[series_name] = {
+                'orbit_model': 'GEO Gated MoE',
+                'clock_model': 'GEO Gated MoE',
+            }
+            continue
+        selection = meo_selections[series_name]
+        orbit_model = selection['orbit_model']
+        clock_model = selection['clock_model']
+        combined = all_predictions[orbit_model][series_name].copy()
+        combined[:, 3] = all_predictions[clock_model][series_name][:, 3]
+        predictions[series_name] = combined
+        routing[series_name] = {
+            'orbit_model': orbit_model,
+            'clock_model': clock_model,
+        }
+    return predictions, routing
+
 def _series_scalers(datasets: dict[str, dict[str, Any]]) -> dict[str, tuple[np.ndarray, np.ndarray]]:
     scalers = {}
     for name, item in datasets.items():
@@ -1240,13 +1332,18 @@ def evaluate_predictions(datasets: dict[str, dict[str, Any]], predictions: dict[
         actual = item['test'][list(TARGETS)].to_numpy(dtype=float)
         residuals = predictions[name] - actual
         residual_frames.append(residuals)
+        orbit_vector_errors = np.linalg.norm(residuals[:, :3], axis=1)
         target_metrics = {TARGETS[i]: shapiro_metrics(residuals[:, i]) for i in range(len(TARGETS))}
         per_series[name] = {
             'rows': len(actual),
             'average_shapiro_w': float(np.mean([m['shapiro_w'] for m in target_metrics.values()])),
+            'orbit_vector_mae_m': float(np.mean(orbit_vector_errors)),
+            'orbit_vector_rmse_m': float(np.sqrt(np.mean(orbit_vector_errors ** 2))),
+            'clock_mae_m': float(np.mean(np.abs(residuals[:, 3]))),
             'per_target': target_metrics,
         }
     residuals = np.vstack(residual_frames)
+    orbit_vector_errors = np.linalg.norm(residuals[:, :3], axis=1)
     pooled_target_metrics = {TARGETS[i]: shapiro_metrics(residuals[:, i]) for i in range(len(TARGETS))}
     evaluations = [metrics for series_report in per_series.values() for metrics in series_report['per_target'].values()]
     avg_ci_lower = float(np.mean([m['shapiro_w_ci_95'][0] for m in evaluations]))
@@ -1261,6 +1358,8 @@ def evaluate_predictions(datasets: dict[str, dict[str, Any]], predictions: dict[
         'average_residual_std': float(np.mean([m['standard_deviation'] for m in evaluations])),
         'overall_mae_m': float(np.mean(np.abs(residuals))),
         'overall_rmse_m': float(np.sqrt(np.mean(residuals ** 2))),
+        'orbit_vector_mae_m': float(np.mean(orbit_vector_errors)),
+        'orbit_vector_rmse_m': float(np.sqrt(np.mean(orbit_vector_errors ** 2))),
         'pooled_average_shapiro_w': float(np.mean([m['shapiro_w'] for m in pooled_target_metrics.values()])),
         'pooled_per_target': pooled_target_metrics,
         'per_series': per_series,
@@ -1338,6 +1437,29 @@ def write_markdown(report: dict[str, Any], path: Path) -> None:
         'The primary score is the macro-average of 12 per-series/per-target Shapiro-Wilk evaluations (3 series × 4 parameters); this avoids mixing different orbit distributions or weighting GEO by its larger row count.',
         '',
         'The published reference benchmark is W = 0.9810, p = 0.5840, hypothesis result = 0. This is a normality benchmark, not an accuracy threshold.',
+        '',
+        '## MEO accuracy refinement',
+        '',
+        f"**MEO accuracy winner: {report['meo_accuracy_winner']}**",
+        '',
+        '| Model | MEO 3D vector MAE (m) | MEO clock MAE (m) |',
+        '|---|---:|---:|',
+    ])
+    for model, metrics in sorted(
+        report['meo_accuracy'].items(),
+        key=lambda item: (item[1]['orbit_vector_mae_m'], item[1]['clock_mae_m']),
+    ):
+        lines.append(
+            f"| {model} | {metrics['orbit_vector_mae_m']:.6f} | "
+            f"{metrics['clock_mae_m']:.6f} |"
+        )
+    promotion = report['meo_promotion']
+    lines.extend([
+        '',
+        f"Promotion gate: **{'PASSED' if promotion['passed'] else 'FAILED'}**. "
+        f"Relative to {promotion['baseline']}, orbit-vector MAE improved by "
+        f"{promotion['relative_orbit_improvement']:.1%} and clock MAE improved by "
+        f"{promotion['relative_clock_improvement']:.1%}.",
         '',
         '## Judge criteria captured from `research/ps08/data/Note.pdf`',
         '',
@@ -1574,9 +1696,86 @@ def run_benchmark(data_dir: Path, output_dir: Path, max_epochs: int=180, device_
         save_qq_plot(datasets, predictions, model_name, output_dir / f'qq_{slug}.png')
         ci = model_metrics[model_name].get('average_shapiro_w_ci_95', [0.0, 0.0])
         print(f"  Avg W={model_metrics[model_name]['average_shapiro_w']:.6f} [95% CI: {ci[0]:.4f}, {ci[1]:.4f}] MAE={model_metrics[model_name]['overall_mae_m']:.6f} m")
+
+    print('Selecting MEO specialists from training-only rolling-origin folds...')
+    meo_selections = select_meo_specialists(datasets)
+    specialist_predictions, specialist_routing = compose_orbit_class_specialist(
+        datasets, all_predictions, meo_selections
+    )
+    specialist_name = 'Orbit-Class Specialist'
+    all_predictions[specialist_name] = specialist_predictions
+    model_metrics[specialist_name] = evaluate_predictions(datasets, specialist_predictions)
+    save_qq_plot(
+        datasets,
+        specialist_predictions,
+        specialist_name,
+        output_dir / 'qq_orbit_class_specialist.png',
+    )
+    specialist_manifest = {
+        'artifact_schema_version': 1,
+        'model': specialist_name,
+        'seed': SEED,
+        'selection_policy': 'minimum training-only rolling-origin MAE by orbit-vector and clock target',
+        'day8_labels_used_for_selection': False,
+        'routing': specialist_routing,
+        'meo_training_validation': meo_selections,
+        'component_artifacts': {
+            'GEO Gated MoE': 'geo_gated_moe_day8.pt',
+            'Gaussian Process': 'gaussian_process_day8.joblib',
+            'Random Forest': 'random_forest_day8.joblib',
+            'Harmonic Ridge': 'harmonic_ridge_day8.joblib',
+            'Persistence': 'persistence_state.json',
+        },
+    }
+    (output_dir / 'orbit_class_specialist_manifest.json').write_text(
+        json.dumps(specialist_manifest, indent=2), encoding='utf-8'
+    )
+    for series_name, routing in specialist_routing.items():
+        print(
+            f"  {series_name}: orbit={routing['orbit_model']}; "
+            f"clock={routing['clock_model']}"
+        )
+
     ranking = sorted(model_metrics, key=lambda name: (-model_metrics[name]['average_shapiro_w'], model_metrics[name]['mean_absolute_bias'], model_metrics[name]['average_residual_std']))
     for rank, model_name in enumerate(ranking, start=1):
         model_metrics[model_name]['rank'] = rank
+
+    def aggregate_meo(metric_name: str, model_name: str) -> float:
+        slices = [
+            model_metrics[model_name]['per_series'][series_name]
+            for series_name, item in datasets.items()
+            if item['spec'].orbit_class == 'MEO'
+        ]
+        return float(
+            sum(item[metric_name] * item['rows'] for item in slices)
+            / sum(item['rows'] for item in slices)
+        )
+
+    meo_accuracy = {
+        model_name: {
+            'orbit_vector_mae_m': aggregate_meo('orbit_vector_mae_m', model_name),
+            'clock_mae_m': aggregate_meo('clock_mae_m', model_name),
+        }
+        for model_name in model_metrics
+    }
+    previous = meo_accuracy['GEO Gated MoE']
+    candidate = meo_accuracy[specialist_name]
+    meo_promotion = {
+        'candidate': specialist_name,
+        'baseline': 'GEO Gated MoE',
+        'passed': bool(
+            candidate['orbit_vector_mae_m'] < previous['orbit_vector_mae_m']
+            and candidate['clock_mae_m'] < previous['clock_mae_m']
+        ),
+        'candidate_metrics': candidate,
+        'baseline_metrics': previous,
+        'relative_orbit_improvement': float(
+            1.0 - candidate['orbit_vector_mae_m'] / previous['orbit_vector_mae_m']
+        ),
+        'relative_clock_improvement': float(
+            1.0 - candidate['clock_mae_m'] / previous['clock_mae_m']
+        ),
+    }
 
     report = {
         'evaluation_protocol': {
@@ -1606,6 +1805,16 @@ def run_benchmark(data_dir: Path, output_dir: Path, max_epochs: int=180, device_
         'winner': ranking[0],
         'ranking': ranking,
         'models': model_metrics,
+        'meo_accuracy': meo_accuracy,
+        'meo_accuracy_winner': min(
+            meo_accuracy,
+            key=lambda name: (
+                meo_accuracy[name]['orbit_vector_mae_m'],
+                meo_accuracy[name]['clock_mae_m'],
+            ),
+        ),
+        'meo_promotion': meo_promotion,
+        'orbit_class_specialist': specialist_manifest,
     }
     (output_dir / 'benchmark_report.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
     save_predictions(datasets, all_predictions, output_dir / 'day8_predictions.csv', diagnostics=all_diagnostics)
