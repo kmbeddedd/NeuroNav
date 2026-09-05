@@ -1,0 +1,46 @@
+{
+  "name": "Random Forest",
+  "model_type": "random_forest",
+  "version": "1.0.0",
+  "architecture": "Random Forest Multi-Output Ensemble + SRP Physics",
+  "parameters": {
+    "n_estimators": 300,
+    "min_samples_leaf": 2,
+    "max_features": 0.8,
+    "enable_srp": true,
+    "use_ric": false
+  },
+  "lookback_steps": 12,
+  "forecast_horizon": 96,
+  "features": [
+    "elapsed_days",
+    "elapsed_days_sq",
+    "sin_harm_1",
+    "cos_harm_1",
+    "sin_harm_2",
+    "cos_harm_2",
+    "sin_harm_3",
+    "cos_harm_3",
+    "sin_harm_4",
+    "cos_harm_4",
+    "sin_harm_5",
+    "cos_harm_5",
+    "sin_harm_6",
+    "cos_harm_6",
+    "sun_beta_angle",
+    "shadow_factor",
+    "solar_cos_angle"
+  ],
+  "requires_physics_features": true,
+  "physics_features": [
+    "sun_beta_angle",
+    "shadow_factor",
+    "solar_cos_angle"
+  ],
+  "target_representation": "ECEF",
+  "supports_uncertainty": false,
+  "trainable": true,
+  "description": "Non-linear decision tree ensemble mapping time and orbital physics + SRP Physics to multi-axis orbit/clock deviations.",
+  "parameter_count": 15000,
+  "artifact_path": null
+}

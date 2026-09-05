@@ -1,0 +1,36 @@
+{
+  "feature_version": "v2",
+  "features": [
+    "elapsed_days",
+    "elapsed_days_sq",
+    "sin_harm_1",
+    "cos_harm_1",
+    "sin_harm_2",
+    "cos_harm_2",
+    "sin_harm_3",
+    "cos_harm_3",
+    "sin_harm_4",
+    "cos_harm_4",
+    "sin_harm_5",
+    "cos_harm_5",
+    "sin_harm_6",
+    "cos_harm_6",
+    "sun_beta_angle",
+    "shadow_factor",
+    "solar_cos_angle"
+  ],
+  "target_columns": [
+    "x_error_m",
+    "y_error_m",
+    "z_error_m",
+    "clock_error_m"
+  ],
+  "physics_mode": "nominal",
+  "use_ric": false,
+  "use_srp": true,
+  "orbital_state_source": "nominal_approximation",
+  "cadence_minutes": 10.0,
+  "harmonics_count": 6,
+  "include_dt": false,
+  "state_artifact": null
+}

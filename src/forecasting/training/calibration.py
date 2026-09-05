@@ -149,15 +149,28 @@ def evaluate_residuals_official_hierarchy(
             "max_discrepancy": max_disc,
         }
 
-        # Basic per-target metrics for reporting and backward compatibility
+        # Target error metrics (MAE, RMSE, R2, Max AE) across each coordinate
         mae = float(np.mean(np.abs(valid_r)))
         rmse = float(np.sqrt(np.mean(np.square(valid_r))))
-        per_target_flat[t_name] = {
+        max_ae = float(np.max(np.abs(valid_r)))
+
+        # R^2 Score (1 - SS_res / SS_tot)
+        valid_act = actual[:, idx][np.isfinite(r)] if actual is not None else None
+        if valid_act is not None and len(valid_act) > 1:
+            ss_tot = float(np.sum((valid_act - np.mean(valid_act)) ** 2))
+            ss_res = float(np.sum(valid_r ** 2))
+            r2 = float(1.0 - (ss_res / ss_tot)) if ss_tot > 1e-12 else (1.0 if ss_res < 1e-12 else 0.0)
+        else:
+            var_sig = float(sigma ** 2 + mu ** 2)
+            r2 = float(max(-1.0, 1.0 - (rmse ** 2 / (var_sig + 1e-6))))
+
+        target_metrics = {
             "mae": mae,
             "rmse": rmse,
             "bias": mu,
             "std": sigma,
-            "max_ae": float(np.max(np.abs(valid_r))),
+            "r2": r2,
+            "max_ae": max_ae,
             "shapiro_w": w_val,
             "shapiro_p": p_val,
             "p_value": p_val,
@@ -165,6 +178,8 @@ def evaluate_residuals_official_hierarchy(
             "is_normal": bool(h_val == 0),
             "qq_outlier_count": num_outliers,
         }
+        per_target_flat[t_name] = target_metrics
+        per_target_flat[alias] = target_metrics
 
     # Equal weighting: exactly 25% X, 25% Y, 25% Z, 25% Clock
     w_avg = float((w_dict["X"] + w_dict["Y"] + w_dict["Z"] + w_dict["Clock"]) / 4.0)
@@ -229,6 +244,20 @@ def evaluate_residuals_official_hierarchy(
             "clock_mae_m": per_target_flat["clock_error_m"]["mae"],
             "sisre_mean_m": float(np.mean(sisre_arr)),
             "sisre_rms_m": float(np.sqrt(np.mean(np.square(sisre_arr)))),
+            "mae": {
+                "3D": float(np.mean(vector_3d_errors)),
+                **{alias: per_target_flat[alias]["mae"] for alias in alias_keys},
+            },
+            "rmse": {
+                "3D": float(np.sqrt(np.mean(np.square(vector_3d_errors)))),
+                **{alias: per_target_flat[alias]["rmse"] for alias in alias_keys},
+            },
+            "r2": {alias: per_target_flat[alias]["r2"] for alias in alias_keys},
+            "max_ae": {alias: per_target_flat[alias]["max_ae"] for alias in alias_keys},
+            "mae_avg": float(np.mean([per_target_flat[alias]["mae"] for alias in alias_keys])),
+            "rmse_avg": float(np.mean([per_target_flat[alias]["rmse"] for alias in alias_keys])),
+            "r2_avg": float(np.mean([per_target_flat[alias]["r2"] for alias in alias_keys])),
+            "max_ae_avg": float(np.mean([per_target_flat[alias]["max_ae"] for alias in alias_keys])),
         },
         # Backward compatibility aliases
         "per_target": per_target_flat,
@@ -647,6 +676,7 @@ class CalibrationPipeline:
                             "aggregate_max_discrepancy": candidate_evaluations[m]["priority_3"]["aggregate_max_discrepancy"],
                         },
                         "supplementary": candidate_evaluations[m]["supplementary"],
+                        "per_target": candidate_evaluations[m].get("per_target", {}),
                     }
                     for m in candidate_evaluations
                 },
@@ -910,6 +940,7 @@ class CalibrationPipeline:
                         "aggregate_max_discrepancy": candidate_evaluations[m]["priority_3"]["aggregate_max_discrepancy"],
                     },
                     "supplementary": candidate_evaluations[m]["supplementary"],
+                    "per_target": candidate_evaluations[m].get("per_target", {}),
                 }
                 for m in candidate_evaluations
             },
