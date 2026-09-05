@@ -324,6 +324,14 @@ Run the historical PS-08 benchmark:
 python main.py benchmark --data-dir data/ps08 --output results/ps08_day8
 ```
 
+The benchmark writes one prediction CSV per held-out input file:
+`DATA_GEO_Test_predictions.csv`, `DATA_MEO_Test_predictions.csv`, and
+`DATA_MEO_Test2_predictions.csv`. Each contains only that dataset's epochs, with
+actual values, predictions, residuals, and a `model` column identifying each candidate.
+Training CSVs supply history; predictions correspond to the paired test CSVs.
+The combined `day8_predictions.csv` remains available for aggregate analysis.
+Use `--max-epochs` and `--device cpu` to control neural training.
+
 Evaluate the active registry and artifacts:
 
 ```powershell

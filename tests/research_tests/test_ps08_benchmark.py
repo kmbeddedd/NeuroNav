@@ -7,7 +7,34 @@ from scripts.benchmark.benchmark_ps08 import (
     compose_orbit_class_specialist,
     evaluate_predictions,
     load_series,
+    save_predictions,
 )
+
+def test_prediction_exports_separate_each_input_without_changing_values(tmp_path):
+    datasets = {}
+    predictions = {'Persistence': {}, 'Other': {}}
+    for index, name in enumerate(['GEO', 'MEO-1', 'MEO-2']):
+        values = np.arange(12, dtype=float).reshape(3, 4) + index * 100
+        datasets[name] = {
+            'spec': SeriesSpec(name, 'GEO' if index == 0 else 'MEO',
+                               f'train{index}.csv', f'test{index}.csv'),
+            'test': pd.DataFrame({'utc_time': pd.date_range('2025-09-08', periods=3, freq='h'),
+                                  **{target: values[:, i] for i, target in enumerate(TARGETS)}}),
+        }
+        predictions['Persistence'][name] = values + 1
+        predictions['Other'][name] = values - 2
+    output = tmp_path / 'nested' / 'day8_predictions.csv'
+    save_predictions(datasets, predictions, output,
+                     diagnostics={'Other': {('MEO-1', 0): {'p_gate': 0.25}}})
+    combined = pd.read_csv(output)
+    assert len(combined) == 18
+    for index, name in enumerate(datasets):
+        separate = pd.read_csv(output.parent / f'test{index}_predictions.csv')
+        pd.testing.assert_frame_equal(
+            separate, combined.loc[combined['series'] == name].reset_index(drop=True)
+        )
+        assert set(separate['model']) == {'Persistence', 'Other'}
+        assert separate.loc[separate['model'] == 'Persistence', 'residual_x_error_m'].eq(1).all()
 
 def test_load_series_normalizes_headers_and_deduplicates(tmp_path: Path):
     path = tmp_path / 'sample.csv'

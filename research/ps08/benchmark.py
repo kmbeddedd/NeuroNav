@@ -1405,7 +1405,15 @@ def save_predictions(
                     for k in diag_keys:
                         row[k] = d_info.get(k, np.nan)
                 rows.append(row)
-    pd.DataFrame(rows).to_csv(output_path, index=False)
+    frame = pd.DataFrame(rows)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    frame.to_csv(output_path, index=False)
+    for series_name, item in datasets.items():
+        spec = item.get('spec')
+        source_stem = Path(spec.test_file if spec is not None else series_name).stem
+        frame.loc[frame['series'] == series_name].to_csv(
+            output_path.parent / f'{source_stem}_predictions.csv', index=False
+        )
 
 def write_markdown(report: dict[str, Any], path: Path) -> None:
     lines = [

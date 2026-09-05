@@ -59,6 +59,8 @@ Commands:
     bench_parser = subparsers.add_parser("benchmark", help="Run official PS-08 benchmark")
     bench_parser.add_argument("--data-dir", default="data/ps08")
     bench_parser.add_argument("--output", default="research/ps08/results")
+    bench_parser.add_argument("--max-epochs", type=int, default=180)
+    bench_parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
 
     # If legacy syntax: python main.py --model bilstm
     if (
@@ -70,9 +72,9 @@ Commands:
         legacy_parser = argparse.ArgumentParser()
         legacy_parser.add_argument("--model", default="bilstm")
         legacy_args, rem = legacy_parser.parse_known_args()
-        sys.argv = [sys.argv[0], "gui", "--cli", "--model", legacy_args.model]
+        sys.argv = [sys.argv[0], "gui", "--cli", "--model", legacy_args.model, *rem]
 
-    args, remaining = parser.parse_known_args()
+    args = parser.parse_args()
 
     if args.command == "gui":
         from app.main import launch_gui, run_headless_demo
@@ -134,7 +136,8 @@ Commands:
 
     elif args.command == "benchmark":
         from scripts.benchmark.benchmark_ps08 import main as run_benchmark
-        run_benchmark(["--data-dir", args.data_dir, "--output", args.output])
+        run_benchmark(["--data-dir", args.data_dir, "--output", args.output,
+                       "--max-epochs", str(args.max_epochs), "--device", args.device])
 
     else:
         parser.print_help()
