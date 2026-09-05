@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>NeuroNav — Orbital Navigation</title>
+
+    <link
+        rel="stylesheet"
+        href="css/style.css"
+    >
+
+</head>
+
+
+<body>
+
+<div id="app">
+
+    <!-- =====================================================
+         3D WORLD
+         ===================================================== -->
+
+    <main id="main">
+
+        <section id="scene-container">
+
+            <div id="scene"></div>
+
+
+            <!-- =================================================
+                 TOP LEFT — MISSION ID
+                 ================================================= -->
+
+            <div id="mission-hud">
+
+                <div class="hud-title">
+                    NEURONAV
+                </div>
+
+                <div class="hud-subtitle">
+                    ORBITAL PREDICTION SYSTEM
+                </div>
+
+                <div class="hud-divider"></div>
+
+                <div class="hud-readout">
+                    <span>SYSTEM</span>
+                    <strong>ONLINE</strong>
+                </div>
+
+                <div class="hud-readout">
+                    <span>MODE</span>
+                    <strong>ORBITAL VIEW</strong>
+                </div>
+
+                <div class="hud-readout">
+                    <span>DATA</span>
+                    <strong>DATA-DRIVEN</strong>
+                </div>
+
+            </div>
+
+
+            <!-- =================================================
+                 TARGET SELECTOR
+                 ================================================= -->
+
+            <div id="target-panel">
+
+                <div class="panel-kicker">
+                    TARGET LOCK
+                </div>
+
+                <div class="target-number">
+                    03
+                </div>
+
+                <select id="satellite-select">
+
+                    <option value="">
+                        SELECT TARGET
+                    </option>
+
+                    <option value="GEO">
+                        GEO
+                    </option>
+
+                    <option value="MEO-1">
+                        MEO-1
+                    </option>
+
+                    <option value="MEO-2">
+                        MEO-2
+                    </option>
+
+                </select>
+
+                <div class="target-hint">
+                    SELECT ORBITAL ASSET
+                </div>
+
+            </div>
+
+
+            <!-- =================================================
+                 TOP RIGHT — WORLD STATUS
+                 ================================================= -->
+
+            <div id="scene-status">
+
+    <span class="status-line">
+        ●
+    </span>
+
+    <span id="status">
+        SYSTEM ONLINE
+    </span>
+
+    <span class="status-separator">
+        //
+    </span>
+
+    <span>
+        ORBITAL VIEW
+    </span>
+
+</div>
+
+
+            <!-- =================================================
+                 CENTER TARGET RETICLE
+                 ================================================= -->
+
+            <div id="target-reticle">
+
+                <div class="reticle-corner top-left"></div>
+
+                <div class="reticle-corner top-right"></div>
+
+                <div class="reticle-corner bottom-left"></div>
+
+                <div class="reticle-corner bottom-right"></div>
+
+                <div id="reticle-label">
+                    TARGET LOCK
+                </div>
+
+            </div>
+
+
+            <!-- =================================================
+                 TELEMETRY PANEL
+                 ================================================= -->
+
+            <section
+                id="prediction-panel"
+                hidden
+            >
+
+                <div class="telemetry-top">
+
+                    <div>
+
+                        <div class="panel-kicker">
+                            ACTIVE TARGET
+                        </div>
+
+                        <h2 id="satellite-name">
+                            GEO
+                        </h2>
+
+                        <p id="orbit-name">
+                            Geostationary Orbit
+                        </p>
+
+                    </div>
+
+
+                    <div class="telemetry-time">
+
+                        <span>
+                            UTC
+                        </span>
+
+                        <strong id="timestamp">
+                            --
+                        </strong>
+
+                    </div>
+
+                </div>
+
+
+                <div class="telemetry-line"></div>
+
+
+                <div id="comparison">
+
+                    <div class="value-card">
+
+                        <h3>
+                            ACTUAL
+                        </h3>
+
+                        <div class="telemetry-tag">
+                            REFERENCE
+                        </div>
+
+
+                        <table>
+
+                            <tbody>
+
+                                <tr>
+                                    <td>EX</td>
+                                    <td id="actual-ex">--</td>
+                                    <td>M</td>
+                                </tr>
+
+                                <tr>
+                                    <td>EY</td>
+                                    <td id="actual-ey">--</td>
+                                    <td>M</td>
+                                </tr>
+
+                                <tr>
+                                    <td>EZ</td>
+                                    <td id="actual-ez">--</td>
+                                    <td>M</td>
+                                </tr>
+
+                                <tr>
+                                    <td>ECLK</td>
+                                    <td id="actual-eclk">--</td>
+                                    <td>M</td>
+                                </tr>
+
+                            </tbody>
+
+                        </table>
+
+                    </div>
+
+
+                    <div class="value-card">
+
+                        <h3>
+                            PREDICTED
+                        </h3>
+
+                        <div class="telemetry-tag">
+                            MODEL
+                        </div>
+
+
+                        <table>
+
+                            <tbody>
+
+                                <tr>
+                                    <td>EX</td>
+                                    <td id="predicted-ex">--</td>
+                                    <td>M</td>
+                                </tr>
+
+                                <tr>
+                                    <td>EY</td>
+                                    <td id="predicted-ey">--</td>
+                                    <td>M</td>
+                                </tr>
+
+                                <tr>
+                                    <td>EZ</td>
+                                    <td id="predicted-ez">--</td>
+                                    <td>M</td>
+                                </tr>
+
+                                <tr>
+                                    <td>ECLK</td>
+                                    <td id="predicted-eclk">--</td>
+                                    <td>M</td>
+                                </tr>
+
+                            </tbody>
+
+                        </table>
+
+                    </div>
+
+                </div>
+
+
+                <div id="residual">
+
+                    <div>
+
+                        <span>
+                            POSITION ERROR
+                        </span>
+
+                        <small>
+                            3D RESIDUAL
+                        </small>
+
+                    </div>
+
+                    <strong id="residual-3d">
+                        --
+                    </strong>
+
+                    <span>
+                        M
+                    </span>
+
+                </div>
+
+            </section>
+
+
+            <!-- =================================================
+                 NAVIGATION HELP
+                 ================================================= -->
+
+            <div id="navigation-help">
+
+                <div>
+                    <strong>
+                        LMB
+                    </strong>
+                    <span>
+                        ORBIT
+                    </span>
+                </div>
+
+                <div>
+                    <strong>
+                        RMB
+                    </strong>
+                    <span>
+                        PAN
+                    </span>
+                </div>
+
+                <div>
+                    <strong>
+                        SCROLL
+                    </strong>
+                    <span>
+                        ZOOM
+                    </span>
+                </div>
+
+            </div>
+
+
+            <!-- =================================================
+                 ORBIT LEGEND
+                 ================================================= -->
+
+            <div id="orbit-legend">
+
+                <div class="legend-title">
+                    ORBITAL ASSETS
+                </div>
+
+                <div class="legend-item">
+                    <span class="legend-dot"></span>
+                    GEO
+                </div>
+
+                <div class="legend-item">
+                    <span class="legend-dot"></span>
+                    MEO-1
+                </div>
+
+                <div class="legend-item">
+                    <span class="legend-dot"></span>
+                    MEO-2
+                </div>
+
+            </div>
+
+
+            <!-- =================================================
+                 BOTTOM HUD
+                 ================================================= -->
+
+            <div id="bottom-hud">
+
+                <span>
+                    NAV
+                </span>
+
+                <span>
+                    ORBITAL TRACKING
+                </span>
+
+                <span>
+                    TELEMETRY LINK
+                </span>
+
+                <span>
+                    DATA-DRIVEN
+                </span>
+
+            </div>
+
+
+            <div id="scene-label">
+
+                <span>
+                    ORBITAL VISUALIZATION
+                </span>
+
+                <span>
+                    SCHEMATIC ORBIT GEOMETRY
+                </span>
+
+            </div>
+
+
+            <!-- =================================================
+                 TIMELINE
+                 ================================================= -->
+
+            <section
+                id="timeline-panel"
+                hidden
+            >
+
+                <div id="timeline-header">
+
+                    <span>
+                        OBSERVATION STREAM
+                    </span>
+
+                    <span id="observation-counter">
+                        0 / 0
+                    </span>
+
+                    <span>
+                        TIME SERIES
+                    </span>
+
+                </div>
+
+
+                <div class="timeline-track">
+
+                    <input
+                        type="range"
+                        id="timeline"
+                        min="0"
+                        max="0"
+                        value="0"
+                        step="1"
+                    >
+
+                </div>
+
+
+                <div id="timeline-controls">
+
+                    <div class="time-readout">
+
+                        <span>
+                            START
+                        </span>
+
+                        <strong id="start-time">
+                            --
+                        </strong>
+
+                    </div>
+
+
+                    <button
+                        id="play-button"
+                        type="button"
+                    >
+                        PLAY
+                    </button>
+
+
+                    <div class="time-readout right">
+
+                        <span>
+                            END
+                        </span>
+
+                        <strong id="end-time">
+                            --
+                        </strong>
+
+                    </div>
+
+                </div>
+
+            </section>
+
+        </section>
+
+    </main>
+
+</div>
+
+
+<script
+    type="module"
+    src="js/visualizer.js"
+></script>
+
+</body>
+
+</html>
