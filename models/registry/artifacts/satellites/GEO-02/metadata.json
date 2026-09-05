@@ -1,0 +1,23 @@
+{
+  "name": "N-HiTS",
+  "model_type": "nhits",
+  "version": "1.0.0",
+  "architecture": "N-HiTS Multi-Rate Hierarchical Interpolation Network",
+  "parameters": {
+    "lookback_steps": 16,
+    "hidden_dim": 32
+  },
+  "lookback_steps": 16,
+  "forecast_horizon": 96,
+  "features": [
+    "hierarchical_target_windows"
+  ],
+  "requires_physics_features": false,
+  "physics_features": [],
+  "target_representation": "ECEF",
+  "supports_uncertainty": false,
+  "trainable": true,
+  "description": "Multi-rate hierarchical pooling and synthesis isolating multi-frequency orbital harmonics.",
+  "parameter_count": 26144,
+  "artifact_path": null
+}

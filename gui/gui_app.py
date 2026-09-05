@@ -7,6 +7,7 @@ Implements the 2-Stage Mission Control Architecture:
 """
 from __future__ import annotations
 
+import functools
 import os
 import sys
 import threading
@@ -30,6 +31,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from scipy import stats
 
 from app.controllers.inference_controller import InferenceController
+from gui.formula_tooltips import FormulaTooltipManager
 from src.calibration_engine import detect_satellite_col, detect_time_col
 from src.models.adapters import MODEL_ADAPTER_CLASSES, get_available_model_adapters
 
@@ -308,6 +310,9 @@ class NeuroNavApp(tk.Tk):
         # TTK Setup
         self._setup_ttk_styles()
 
+        # Formula Tooltip Manager (Interactive '?' logos and floating formula cards)
+        self.formula_tooltip_mgr = FormulaTooltipManager(self)
+
         # Workspace Container
         self.container = tk.Frame(self, bg=STITCH_THEME['bg_app'])
         self.container.pack(fill='both', expand=True, padx=20, pady=16)
@@ -382,6 +387,8 @@ class NeuroNavApp(tk.Tk):
 
     def show_page(self, page_num: int) -> None:
         """Switch view between Stage 1, Stage 2, and Diagnostics."""
+        if hasattr(self, 'formula_tooltip_mgr') and self.formula_tooltip_mgr:
+            self.formula_tooltip_mgr.hide_tooltip(force=True)
         if page_num == 1:
             self.page1.tkraise()
         elif page_num == 2:
@@ -945,8 +952,21 @@ class NeuroNavApp(tk.Tk):
         stat_card.pack(fill='x', pady=(0, 10))
         stat = stat_card.inner_frame
 
-        self.p3_stat_hdr = tk.Label(stat, text="SHAPIRO-WILK NORMALITY & ERROR PARAMETERS", font=FONT_SUBHEADING, fg=STITCH_THEME['fg_primary'], bg=STITCH_THEME['bg_surface'])
-        self.p3_stat_hdr.pack(anchor='w', pady=(0, 6))
+        stat_hdr_row = tk.Frame(stat, bg=STITCH_THEME['bg_surface'])
+        stat_hdr_row.pack(fill='x', pady=(0, 6))
+
+        self.p3_stat_hdr = tk.Label(stat_hdr_row, text="SHAPIRO-WILK NORMALITY & ERROR PARAMETERS", font=FONT_SUBHEADING, fg=STITCH_THEME['fg_primary'], bg=STITCH_THEME['bg_surface'])
+        self.p3_stat_hdr.pack(side='left')
+
+        tk.Label(
+            stat_hdr_row,
+            text="Hover '?' on header to inspect mathematical formula",
+            font=FONT_BADGE,
+            fg=STITCH_THEME['btn_accent_bg'],
+            bg=STITCH_THEME['table_select_bg'],
+            padx=8,
+            pady=2
+        ).pack(side='right')
 
         sh_table_wrap = tk.Frame(stat, bg=STITCH_THEME['bg_surface'], highlightbackground=STITCH_THEME['border'], highlightthickness=1)
         sh_table_wrap.pack(fill='x')
@@ -964,10 +984,36 @@ class NeuroNavApp(tk.Tk):
         self.shapiro_table.heading('r2', text='R² SCORE')
         self.shapiro_table.heading('max_ae', text='MAX AE (M)')
 
+        sh_col_widths = {
+            'target': 130,
+            'w_stat': 115,
+            'p_val': 110,
+            'h0_res': 120,
+            'bias': 140,
+            'std': 125,
+            'mae': 115,
+            'rmse': 115,
+            'r2': 115,
+            'max_ae': 120,
+        }
         for c in sh_cols:
-            self.shapiro_table.column(c, width=110, anchor='center' if c in ('target', 'w_stat', 'p_val') else 'e')
+            self.shapiro_table.column(c, width=sh_col_widths.get(c, 115), anchor='center' if c in ('target', 'w_stat', 'p_val') else 'e')
 
         self.shapiro_table.pack(fill='x')
+
+        # Attach interactive formula tooltips
+        sh_col_mapping = {
+            'w_stat': 'w_stat',
+            'p_val': 'p_val',
+            'h0_res': 'h0_res',
+            'bias': 'bias',
+            'std': 'std',
+            'mae': 'mae',
+            'rmse': 'rmse',
+            'r2': 'r2',
+            'max_ae': 'max_ae',
+        }
+        self.formula_tooltip_mgr.attach_to_tree(self.shapiro_table, sh_col_mapping)
 
         # Matplotlib Plot Card
         plot_card = StitchCard(p3, bg_color=STITCH_THEME['bg_surface'], border_color=STITCH_THEME['border'], radius=8, inner_pad=14)
@@ -1292,18 +1338,58 @@ class NeuroNavApp(tk.Tk):
         candidates = entry.get('candidate_models', {})
         v_metrics = entry.get('validation_metrics', {})
 
-        # Priority 1: Sort candidates by Shapiro W descending
-        # Priority 2: Residual mean ascending, residual std ascending, 3D MAE ascending
-        def get_model_sort_key(item):
-            m_id = item[0]
-            m_metrics = v_metrics.get(m_id, {})
-            w = float(m_metrics.get('shapiro_w_mean', item[1] if isinstance(item[1], (int, float)) else 0.0))
-            b = float(m_metrics.get('mean_res_mean', 9999.0))
-            s = float(m_metrics.get('std_res_mean', 9999.0))
-            mae = float(m_metrics.get('mae_3d', 999999.0))
-            return (-w, b, s, mae)
+        # Rank candidate models strictly following the Official Competition Hierarchy:
+        # 1. Selected winner holds Rank 1
+        # 2. Priority 1: Shapiro-Wilk W_avg descending (with tie tolerance tau=1e-4)
+        # 3. Priority 2: Aggregate absolute bias |mean| ascending (tie tolerance tau=1e-4)
+        # 4. Priority 2b: Aggregate residual standard deviation ascending (tie tolerance tau=1e-4)
+        # 5. Priority 3: 3D MAE ascending, then 3D RMSE ascending
+        def compare_candidate_models(item_a, item_b):
+            m_id_a, sc_a = item_a
+            m_id_b, sc_b = item_b
 
-        sorted_cands = sorted(candidates.items(), key=get_model_sort_key)
+            # Selected winner takes top rank
+            if m_id_a == sel_model and m_id_b != sel_model:
+                return -1
+            if m_id_b == sel_model and m_id_a != sel_model:
+                return 1
+
+            ma = v_metrics.get(m_id_a, {})
+            mb = v_metrics.get(m_id_b, {})
+
+            # Priority 1: Shapiro-Wilk W_avg (higher is better, tie tolerance 1e-4)
+            wa = float(ma.get('shapiro_w_mean', sc_a if isinstance(sc_a, (int, float)) else 0.0))
+            wb = float(mb.get('shapiro_w_mean', sc_b if isinstance(sc_b, (int, float)) else 0.0))
+            if abs(wa - wb) > 1e-4:
+                return -1 if wa > wb else 1
+
+            # Priority 2: Absolute residual mean bias (lower is better, tie tolerance 1e-4)
+            ba = abs(float(ma.get('mean_res_mean', 9999.0)))
+            bb = abs(float(mb.get('mean_res_mean', 9999.0)))
+            if abs(ba - bb) > 1e-4:
+                return -1 if ba < bb else 1
+
+            # Priority 2b: Aggregate residual standard deviation (lower is better, tie tolerance 1e-4)
+            sa = float(ma.get('std_res_mean', 9999.0))
+            sb = float(mb.get('std_res_mean', 9999.0))
+            if abs(sa - sb) > 1e-4:
+                return -1 if sa < sb else 1
+
+            # Priority 3: 3D MAE (lower is better)
+            maea = float(ma.get('mae_3d', 999999.0))
+            maeb = float(mb.get('mae_3d', 999999.0))
+            if abs(maea - maeb) > 1e-4:
+                return -1 if maea < maeb else 1
+
+            # Supplementary tie-breaker: 3D RMSE
+            rmsea = float(ma.get('rmse_3d', 999999.0))
+            rmseb = float(mb.get('rmse_3d', 999999.0))
+            if abs(rmsea - rmseb) > 1e-4:
+                return -1 if rmsea < rmseb else 1
+
+            return -1 if m_id_a < m_id_b else (1 if m_id_a > m_id_b else 0)
+
+        sorted_cands = sorted(candidates.items(), key=functools.cmp_to_key(compare_candidate_models))
         for idx, (m_id, sc) in enumerate(sorted_cands):
             m_metrics = v_metrics.get(m_id, {})
             mae_3d = f"{m_metrics.get('mae_3d', 0.0):.4f}" if 'mae_3d' in m_metrics else "—"
@@ -2143,16 +2229,26 @@ class NeuroNavApp(tk.Tk):
             max_ae = _flt_fmt(tm.get('max_ae', 0.0))
             self.shapiro_table.insert('', 'end', values=(label, w, p, h0_str, bias, std, mae, rmse, r2, max_ae))
 
-        # Overall Macro-Average Row (Priority 1 & Priority 2)
+        # Overall Macro-Average Row (Priority 1, Priority 2, and Macro Error Parameters)
         w_all = _flt_fmt(model_metrics.get('shapiro_w_mean', 1.0), 1.0)
         p_all = format_stat_p_val(model_metrics.get('shapiro_p_mean', 1.0))
         h0_all = model_metrics.get('h0_result_mean', 0 if float(model_metrics.get('shapiro_p_mean', 1.0)) >= 0.05 else 1)
         h0_all_str = f"{h0_all} (Normal)" if h0_all == 0 else f"{h0_all} (Reject)"
         bias_all = _flt_fmt(model_metrics.get('mean_res_mean', 0.0))
         std_all = _flt_fmt(model_metrics.get('std_res_mean', 0.0))
-        mae_3d_all = _flt_fmt(model_metrics.get('mae_3d', 0.0))
-        rmse_3d_all = _flt_fmt(model_metrics.get('rmse_3d', 0.0))
-        self.shapiro_table.insert('', 'end', values=("MACRO-AVG (ALL 4)", w_all, p_all, h0_all_str, bias_all, std_all, mae_3d_all, rmse_3d_all, "—", "—"), tags=('summary',))
+
+        # Compute macro averages across all 4 targets for the summary row
+        maes = [float(per_target.get(k, {}).get('mae', 0.0)) for _, k in targets if k in per_target]
+        rmses = [float(per_target.get(k, {}).get('rmse', 0.0)) for _, k in targets if k in per_target]
+        r2s = [float(per_target.get(k, {}).get('r2', 0.0)) for _, k in targets if k in per_target]
+        max_aes = [float(per_target.get(k, {}).get('max_ae', 0.0)) for _, k in targets if k in per_target]
+
+        mae_all = _flt_fmt(np.mean(maes) if maes else model_metrics.get('mae_macro', model_metrics.get('mae_3d', 0.0)))
+        rmse_all = _flt_fmt(np.mean(rmses) if rmses else model_metrics.get('rmse_macro', model_metrics.get('rmse_3d', 0.0)))
+        r2_all = _flt_fmt(np.mean(r2s) if r2s else model_metrics.get('r2_mean', 0.0))
+        max_ae_all = _flt_fmt(np.max(max_aes) if max_aes else model_metrics.get('max_ae_mean', 0.0))
+
+        self.shapiro_table.insert('', 'end', values=("MACRO-AVG (ALL 4)", w_all, p_all, h0_all_str, bias_all, std_all, mae_all, rmse_all, r2_all, max_ae_all), tags=('summary',))
         self.shapiro_table.tag_configure('summary', background=STITCH_THEME['table_select_bg'])
 
         # Render Matplotlib plots

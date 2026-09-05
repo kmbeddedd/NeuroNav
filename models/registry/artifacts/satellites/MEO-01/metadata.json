@@ -1,0 +1,41 @@
+{
+  "name": "Harmonic Ridge",
+  "model_type": "harmonic_ridge",
+  "version": "1.0.0",
+  "architecture": "Ridge-Regularized Polynomial + Multi-Harmonic Extrapolator + SRP Physics",
+  "parameters": {
+    "alpha": 1.0,
+    "harmonics": 6,
+    "use_srp": true,
+    "use_ric": false
+  },
+  "lookback_steps": 12,
+  "forecast_horizon": 96,
+  "features": [
+    "elapsed_days",
+    "elapsed_days_sq",
+    "sin_harm_1",
+    "cos_harm_1",
+    "sin_harm_2",
+    "cos_harm_2",
+    "sin_harm_3",
+    "cos_harm_3",
+    "sin_harm_4",
+    "cos_harm_4",
+    "sin_harm_5",
+    "cos_harm_5",
+    "sin_harm_6",
+    "cos_harm_6",
+    "sun_beta_angle",
+    "shadow_factor",
+    "solar_cos_angle"
+  ],
+  "requires_physics_features": false,
+  "physics_features": [],
+  "target_representation": "ECEF",
+  "supports_uncertainty": false,
+  "trainable": true,
+  "description": "L2 regularized multi-frequency harmonic model capturing diurnal and orbital resonance + SRP Physics.",
+  "parameter_count": 72,
+  "artifact_path": null
+}
